@@ -13,6 +13,9 @@ namespace ScrapSiege.Terrain
         public HeightCategory Height;
         public TerrainArchetype Archetype;
 
+        /// <summary>The spawned placeholder GameObject for this object, set after TerrainObjectSpawner.Spawn.</summary>
+        public GameObject Visual;
+
         public Vector3 Center => (CornerA + CornerB) * 0.5f;
 
         /// <summary>Footprint extent along world X.</summary>
