@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.AI;
 
 namespace ScrapSiege.Terrain
 {
@@ -37,11 +38,12 @@ namespace ScrapSiege.Terrain
 
             go.transform.position = data.Center + Vector3.up * (height * 0.5f);
 
+            float diameter = Mathf.Max(sizeX, sizeZ);
+
             switch (primitive)
             {
                 case PrimitiveType.Cylinder:
                     // Unity's default cylinder is 2 units tall with a 1-unit diameter.
-                    float diameter = Mathf.Max(sizeX, sizeZ);
                     go.transform.localScale = new Vector3(diameter, height * 0.5f, diameter);
                     break;
 
@@ -51,6 +53,26 @@ namespace ScrapSiege.Terrain
                     if (!data.LongAxisIsX)
                         go.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
                     break;
+            }
+
+            // Every terrain object blocks Siege pathing the instant it's placed - carving
+            // updates live against the one baked NavMesh, so Undo/Delete during Fortify never
+            // require a rebake.
+            var obstacle = go.AddComponent<NavMeshObstacle>();
+            obstacle.carving = true;
+            if (primitive == PrimitiveType.Cylinder)
+            {
+                // Radius/Height are local-space, scaled by the transform like a CapsuleCollider -
+                // use the default primitive's own unit dimensions (0.5 radius, 2 height) and let
+                // the already-applied localScale do the real-world sizing, same as the Box case.
+                obstacle.shape = NavMeshObstacleShape.Capsule;
+                obstacle.radius = 0.5f;
+                obstacle.height = 2f;
+            }
+            else
+            {
+                obstacle.shape = NavMeshObstacleShape.Box;
+                obstacle.size = Vector3.one; // local scale already carries the true footprint/height
             }
 
             var renderer = go.GetComponent<Renderer>();
