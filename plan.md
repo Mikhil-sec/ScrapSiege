@@ -133,7 +133,22 @@ Front-loaded so the highest-risk, most novel technical piece (cross-device Cloud
 - **Two-device testing logistics.** This project cannot be fully tested solo on one device — plan early to have consistent access to a second phone (ideally a different brand) throughout the build, not just at the end.
 - **iOS deferred, Android-first.** No Mac is available for local Xcode builds. Development and all core testing target **Android-to-Android Cloud Anchor sync** first (e.g. Honor + a second Android phone), which is fully achievable without a Mac. An iOS build remains possible later via a cloud macOS CI service (e.g. Codemagic) for the cross-platform demo, but it is not a blocker for weeks 1–5 and should not be assumed available during core development.
 
-## 9. Next Gen Submission Checklist (for later, keep in view throughout)
+## 9. Award Judging Criteria (both target categories - keep in view throughout, not just at submission time)
+
+Confirmed as of 2026-08-03. **Next Gen (student lane) is the prime target**; Best Game is a secondary target with the same submission. Every feature/polish decision from here on should be weighed against both rubrics below, not just against plan.md's own design goals.
+
+### Next Gen Award (student-only, requires .edu or equivalent email; judged on video + open-source code, no store release required)
+- Is the app idea clear, useful, interesting, or original? Does it solve a real problem or create a compelling experience for its intended users?
+- Does the submitted project demonstrate meaningful progress toward a working app? Is the core functionality clear from the video and code repository?
+- Does the project thoughtfully use RevenueCat to support subscriptions, in-app purchases, web purchases, ads, or another monetization flow?
+- Does the submission show thoughtful technical choices, product thinking, and care in how the app was built and presented?
+
+### Best Game Award (open category, best mobile game shipped during the event)
+- Is the game fun and engaging to play?
+- Does it provide a unique gameplay experience, progression, or replayability?
+- How is the game monetized?
+
+## 10. Next Gen Submission Checklist (for later, keep in view throughout)
 
 - [ ] App built and demoed (no store listing required for Next Gen)
 - [ ] RevenueCat SDK integrated, powering at least one in-app purchase
