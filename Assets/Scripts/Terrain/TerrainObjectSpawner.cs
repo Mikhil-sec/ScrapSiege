@@ -1,3 +1,4 @@
+using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -20,6 +21,12 @@ namespace ScrapSiege.Terrain
         // A near-square/round footprint (aspect ratio close to 1) reads better as a cylinder
         // than a cube - e.g. a hairgel bottle or mug should not render as a rectangular block.
         [SerializeField] private float roundnessAspectRatioThreshold = 1.3f;
+
+        // How far past the object's own footprint the CoverLane NavMesh area extends - wide
+        // enough that a unit passing alongside (not just on top of) the object still counts as
+        // covered for GarrisonSentry's exposure check.
+        [SerializeField] private float coverLaneMargin = 0.25f;
+        [SerializeField] private float coverLaneVolumeHeight = 1f;
 
         [Header("Height category -> world height (meters)")]
         [SerializeField] private float shortHeight = 0.06f;
@@ -87,7 +94,34 @@ namespace ScrapSiege.Terrain
                 renderer.material = material;
             }
 
+            if (data.Archetype == TerrainArchetype.RubbleCover || data.Archetype == TerrainArchetype.WallBarricade)
+                data.CoverVolume = TagCoverLane(data, sizeX, sizeZ);
+
             return go;
+        }
+
+        /// <summary>
+        /// Route-variety mechanic: marks the ground around cover-type terrain with a NavMesh
+        /// area a "Covered" deploy route can detour through (see NavMeshAreas). Must run before
+        /// SiegePhaseController bakes the NavMesh, which is guaranteed since all Fortify spawning
+        /// happens before StartSiege(). A standalone GameObject (not parented to the terrain
+        /// visual) so its size isn't affected by the visual's own transform.localScale - caller
+        /// stores the returned object on TerrainObjectData.CoverVolume so Undo/Delete can clean
+        /// it up alongside the visual instead of leaking an orphaned cover tag.
+        /// </summary>
+        private GameObject TagCoverLane(TerrainObjectData data, float sizeX, float sizeZ)
+        {
+            var coverVolumeGO = new GameObject($"CoverLane_{data.Archetype}");
+            coverVolumeGO.transform.position = data.Center;
+
+            var modifier = coverVolumeGO.AddComponent<NavMeshModifierVolume>();
+            modifier.area = NavMeshAreas.CoverAreaIndex;
+            modifier.size = new Vector3(sizeX + coverLaneMargin * 2f, coverLaneVolumeHeight, sizeZ + coverLaneMargin * 2f);
+            // Volume's transform.position is already at table height (data.Center), so this
+            // offset just extends the volume upward from the table surface, not around data.Center.y again.
+            modifier.center = new Vector3(0f, coverLaneVolumeHeight * 0.5f, 0f);
+
+            return coverVolumeGO;
         }
 
         private float HeightForCategory(HeightCategory category)

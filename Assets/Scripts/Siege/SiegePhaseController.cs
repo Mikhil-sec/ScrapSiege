@@ -11,7 +11,8 @@ namespace ScrapSiege.Siege
     /// Owns the Fortify -> Siege handoff: ends Fortify input, drops a synthetic ground quad
     /// and dummy base a fixed distance in front of the player at real table height (stand-in
     /// for a real opponent base until Week 3 Cloud Anchor sync exists), bakes the NavMesh once
-    /// terrain is final, then turns on the resource/deployment systems.
+    /// terrain is final, runs Muster (auto-garrison at chokepoints), wires the win-condition
+    /// watcher, then turns on the resource/deployment systems.
     /// </summary>
     public class SiegePhaseController : MonoBehaviour
     {
@@ -23,6 +24,8 @@ namespace ScrapSiege.Siege
         [SerializeField] private GameObject dummyBasePrefab;
         [SerializeField] private ResourceEconomy resourceEconomy;
         [SerializeField] private UnitDeploymentController deploymentController;
+        [SerializeField] private MusterPhaseController musterPhase;
+        [SerializeField] private SiegeOutcomeController outcomeController;
 
         [SerializeField] private float dummyBaseDistance = 2f;
         [SerializeField] private float groundQuadSize = 4f;
@@ -30,6 +33,29 @@ namespace ScrapSiege.Siege
         private readonly List<ARRaycastHit> hits = new List<ARRaycastHit>();
 
         public Transform DummyBase { get; private set; }
+        public BaseHealth DummyBaseHealth { get; private set; }
+
+        private void Awake()
+        {
+            // These are all required for StartSiege() to run - a missing one used to fail
+            // silently or deep into a play session (the win-panel bug). Catch it at startup.
+            CheckRef(fortify, nameof(fortify));
+            CheckRef(arCamera, nameof(arCamera));
+            CheckRef(raycastManager, nameof(raycastManager));
+            CheckRef(navMeshSurface, nameof(navMeshSurface));
+            CheckRef(groundQuadPrefab, nameof(groundQuadPrefab));
+            CheckRef(dummyBasePrefab, nameof(dummyBasePrefab));
+            CheckRef(resourceEconomy, nameof(resourceEconomy));
+            CheckRef(deploymentController, nameof(deploymentController));
+            CheckRef(musterPhase, nameof(musterPhase));
+            CheckRef(outcomeController, nameof(outcomeController));
+        }
+
+        private void CheckRef(Object reference, string fieldName)
+        {
+            if (reference == null)
+                Debug.LogError($"SiegePhaseController: '{fieldName}' is not assigned in the Inspector - StartSiege() will fail or behave incorrectly.", this);
+        }
 
         /// <summary>Wire to the "Done" button - replaces the direct FinishFortify() wire.</summary>
         public void StartSiege()
@@ -46,8 +72,21 @@ namespace ScrapSiege.Siege
 
             var dummyBase = Instantiate(dummyBasePrefab, basePosition, Quaternion.identity);
             DummyBase = dummyBase.transform;
+            DummyBaseHealth = dummyBase.GetComponent<BaseHealth>();
+
+            if (DummyBaseHealth == null)
+                Debug.LogError("SiegePhaseController: dummyBasePrefab's root object has no BaseHealth component - the base can never take damage or be destroyed.", dummyBase);
 
             navMeshSurface.BuildNavMesh();
+            NavMeshAreas.ApplyGlobalCost();
+
+            musterPhase.SpawnGarrison(fortify.ScannedObjects);
+
+            // Guarded rather than unconditional - previously a null DummyBaseHealth would throw
+            // inside WatchBase() and abort StartSiege() before the lines below ever ran, silently
+            // preventing Siege from starting at all instead of just missing the win condition.
+            if (DummyBaseHealth != null)
+                outcomeController.WatchBase(DummyBaseHealth);
 
             resourceEconomy.enabled = true;
             deploymentController.enabled = true;

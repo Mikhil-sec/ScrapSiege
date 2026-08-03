@@ -25,6 +25,7 @@ namespace ScrapSiege.Terrain
 
         [SerializeField] private ARRaycastManager raycastManager;
         [SerializeField] private Camera arCamera;
+        [SerializeField] private ARPlaneManager planeManager;
 
         [Header("Height-pick UI - shown only while picking a height for the current object")]
         [SerializeField] private GameObject[] heightPickButtons;
@@ -40,6 +41,9 @@ namespace ScrapSiege.Terrain
         private TerrainObjectSpawner spawner;
         private readonly List<ARRaycastHit> hits = new List<ARRaycastHit>();
         private readonly List<TerrainObjectData> scannedObjects = new List<TerrainObjectData>();
+
+        /// <summary>Final scanned terrain, valid after FinishFortify() - used by MusterPhaseController.</summary>
+        public IReadOnlyList<TerrainObjectData> ScannedObjects => scannedObjects;
 
         private Vector3 pendingCornerA;
         private GameObject cornerAMarker;
@@ -143,6 +147,7 @@ namespace ScrapSiege.Terrain
             var last = scannedObjects[scannedObjects.Count - 1];
             scannedObjects.RemoveAt(scannedObjects.Count - 1);
             if (last.Visual != null) Destroy(last.Visual);
+            if (last.CoverVolume != null) Destroy(last.CoverVolume);
 
             OnObjectCount?.Invoke(scannedObjects.Count);
         }
@@ -176,6 +181,7 @@ namespace ScrapSiege.Terrain
                 if (scannedObjects[i].Visual != hit.collider.gameObject) continue;
 
                 Destroy(scannedObjects[i].Visual);
+                if (scannedObjects[i].CoverVolume != null) Destroy(scannedObjects[i].CoverVolume);
                 scannedObjects.RemoveAt(i);
                 OnObjectCount?.Invoke(scannedObjects.Count);
                 return;
@@ -194,6 +200,13 @@ namespace ScrapSiege.Terrain
         {
             TerrainClassifier.ApplyWatchtowerOverride(scannedObjects);
             enabled = false;
+
+            // ARCore keeps refining/extending plane boundaries as it tracks more of the room,
+            // including mid-Siege as the camera pans. Terrain and NavMesh are locked in by now,
+            // so further plane growth only causes visual drift (planes stretching across the
+            // table or through furniture) - freeze detection instead of letting it keep updating.
+            if (planeManager != null)
+                planeManager.requestedDetectionMode = PlaneDetectionMode.None;
         }
     }
 }

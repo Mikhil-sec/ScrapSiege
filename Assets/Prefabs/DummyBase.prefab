@@ -26,15 +26,15 @@ RectTransform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4787846236704670003}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0.03}
+  m_LocalScale: {x: 0.3, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 3668302216935800108}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: 0.3}
+  m_AnchoredPosition: {x: 1.64, y: 6.1}
   m_SizeDelta: {x: 20, y: 5}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!23 &402488464700642360
@@ -193,6 +193,7 @@ GameObject:
   - component: {fileID: 6481293787555414853}
   - component: {fileID: 3845323884654136105}
   - component: {fileID: 6299065144138072604}
+  - component: {fileID: 5106337762777148959}
   m_Layer: 0
   m_Name: DummyBase
   m_TagString: Untagged
@@ -296,3 +297,22 @@ CapsuleCollider:
   m_Height: 2
   m_Direction: 1
   m_Center: {x: 0.000000059604645, y: 0, z: -0.00000008940697}
+--- !u!114 &5106337762777148959
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5780401816922500609}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dab539cb46e4e114d9a9cbb9d586b4a1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ScrapSiege.Siege.BaseHealth
+  maxHealth: 20
+  OnHealthChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  OnBaseDestroyed:
+    m_PersistentCalls:
+      m_Calls: []

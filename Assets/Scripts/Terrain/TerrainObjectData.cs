@@ -16,6 +16,9 @@ namespace ScrapSiege.Terrain
         /// <summary>The spawned placeholder GameObject for this object, set after TerrainObjectSpawner.Spawn.</summary>
         public GameObject Visual;
 
+        /// <summary>The CoverLane NavMesh tagging volume, if this archetype creates one (RubbleCover/WallBarricade). Null otherwise.</summary>
+        public GameObject CoverVolume;
+
         public Vector3 Center => (CornerA + CornerB) * 0.5f;
 
         /// <summary>Footprint extent along world X.</summary>
