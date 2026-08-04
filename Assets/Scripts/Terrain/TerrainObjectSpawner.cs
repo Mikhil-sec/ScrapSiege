@@ -1,6 +1,7 @@
 using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.AI;
+using ScrapSiege.Monetization;
 
 namespace ScrapSiege.Terrain
 {
@@ -9,7 +10,9 @@ namespace ScrapSiege.Terrain
     /// the real object's measured position, scaled at least as large as the footprint so the
     /// real object never peeks out. Placeholder colors only for now - swap in real textured
     /// art here once available (plan.md Week 5 polish); nothing downstream (pathing, gameplay)
-    /// depends on the visual.
+    /// depends on the visual. Color palette is the one Pro cosmetic unlock built alongside the
+    /// RevenueCat integration - reads ProEntitlement.IsUnlocked (a decoupled gate, not the
+    /// RevenueCat SDK directly - see ProEntitlement.cs for why).
     /// </summary>
     public class TerrainObjectSpawner : MonoBehaviour
     {
@@ -154,6 +157,13 @@ namespace ScrapSiege.Terrain
 
         private static Color ColorForArchetype(TerrainArchetype archetype)
         {
+            return ProEntitlement.IsUnlocked
+                ? ProColorForArchetype(archetype)
+                : FreeColorForArchetype(archetype);
+        }
+
+        private static Color FreeColorForArchetype(TerrainArchetype archetype)
+        {
             switch (archetype)
             {
                 case TerrainArchetype.WallBarricade: return new Color(0.55f, 0.4f, 0.25f);
@@ -162,6 +172,22 @@ namespace ScrapSiege.Terrain
                 case TerrainArchetype.Watchtower: return new Color(0.7f, 0.15f, 0.15f);
                 case TerrainArchetype.PlainObstacle:
                 default: return new Color(0.4f, 0.6f, 0.4f);
+            }
+        }
+
+        // Pro cosmetic palette (the "Scrap Siege Pro" subscription's testable IAP) - a distinct,
+        // more saturated look. Same archetypes, same gameplay, purely a reskin - matches
+        // plan.md Section 6's "genuine value-tier gating, not functionality lockout" design.
+        private static Color ProColorForArchetype(TerrainArchetype archetype)
+        {
+            switch (archetype)
+            {
+                case TerrainArchetype.WallBarricade: return new Color(0.85f, 0.55f, 0.15f);
+                case TerrainArchetype.SpireChokepoint: return new Color(0.25f, 0.55f, 0.95f);
+                case TerrainArchetype.RubbleCover: return new Color(0.9f, 0.8f, 0.2f);
+                case TerrainArchetype.Watchtower: return new Color(0.9f, 0.1f, 0.55f);
+                case TerrainArchetype.PlainObstacle:
+                default: return new Color(0.2f, 0.85f, 0.5f);
             }
         }
     }

@@ -38,10 +38,14 @@ input as the primary path, not a fallback for lesser hardware). Terrain classifi
 pure rule-based computational geometry — bounding box, height category, footprint aspect
 ratio — with zero machine learning anywhere in the pipeline, by design. Pathing uses Unity's
 NavMesh with custom area costs so a "safer" route through cover terrain is a genuine
-distance/risk trade-off, not just a different-looking line. We leaned heavily on Claude Code
-as a coding partner, but held every gameplay claim to the same bar: nothing is "done" until
-it's been tested on the real device and, where behavior looked wrong, confirmed against
-`adb logcat` rather than guessed from reading the code.
+distance/risk trade-off, not just a different-looking line. Monetization runs on the
+RevenueCat Unity SDK, configured through the RevenueCat MCP server directly against our own
+dashboard — one entitlement gates a real cosmetic feature (a second terrain color palette),
+not a placeholder toggle. We leaned heavily on Claude Code as a coding partner, including
+letting it operate the live Unity Editor directly through a Unity MCP connection once one was
+available, but held every gameplay claim to the same bar regardless of who typed the code:
+nothing is "done" until it's been tested on the real device and, where behavior looked wrong,
+confirmed against `adb logcat` rather than guessed from reading the code.
 
 ## Challenges we ran into
 
@@ -61,6 +65,18 @@ it's been tested on the real device and, where behavior looked wrong, confirmed 
   zero health and fired its destroy event — but a missing Inspector reference crashed the
   very next line before the win screen could ever show. It took pulling `adb logcat`
   mid-test to prove the win logic was actually fine and find the real, one-line cause.
+- **RevenueCat integration surfaced a genuine Unity lifecycle trap:** the SDK's internal
+  state is only allocated in its own `Start()`, so configuring it from another script's
+  `Awake()` — which runs earlier for the whole scene, before any `Start()` — threw a null
+  reference that only appeared on-device. A second, independent failure (auto-configuring
+  itself with empty keys unless a specific flag is set) was stacked on top of the first,
+  so the fix needed both a forced execution order and a one-line Inspector flag, not just one
+  patch. Diagnosed the same way as everything else here: real device, real logcat, no
+  guessing.
+- **A real purchase still can't complete on a physical device without a Google Play Console
+  product** — RevenueCat's free Test Store is enough to validate every line of purchase-flow
+  code in the Unity Editor, but real Android devices always go through actual Google Play
+  Billing, which won't recognize a product that only exists in a test sandbox.
 
 ## Accomplishments that we're proud of
 
@@ -73,6 +89,9 @@ it's been tested on the real device and, where behavior looked wrong, confirmed 
   weight to how players physically build their terrain, not just how they spend resources.
 - A debugging habit that consistently found true root causes on real hardware instead of
   guessing from code review alone.
+- Real monetization plumbing, not a mockup — a working entitlement, offering, and a genuine
+  Pro-gated cosmetic feature, verified end-to-end in Editor Play Mode ahead of the real
+  store listing that Next Gen doesn't even require.
 
 ## What we learned
 
@@ -86,10 +105,11 @@ it's been tested on the real device and, where behavior looked wrong, confirmed 
 
 ## What's next for Scrap Siege
 
+- A Google Play Console product to let the already-built purchase flow actually complete on
+  a real device, not just in the Editor.
 - Two-device Cloud Anchor sync and the camera-height tactical trade-off (blocked on getting
   a second Android test device).
-- Real RevenueCat subscription/IAP integration.
-- An art and animation polish pass over the current placeholder terrain visuals.
+- An art and animation polish pass over the current placeholder terrain and paywall visuals.
 - A demo video, public repo cleanup, and full submission assets.
 - A possible redesign of the garrison from an automatic freebie into a capturable, contested
   point — once a real opponent exists to contest it against.

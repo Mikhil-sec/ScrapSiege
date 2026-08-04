@@ -9,23 +9,24 @@ Full game design — mechanics, terrain classification rules, monetization, time
 ## Current status
 
 **Working end-to-end today:**
-- AR plane detection (ARCore/AR Foundation), validated on Android with no depth sensor required.
+- AR plane detection (ARCore/AR Foundation), validated on Android with no depth sensor required; plane detection freezes automatically once Fortify ends to avoid mid-match drift.
 - **Fortify phase** — tap two corners of a real object on the live camera view, pick a height (Short/Medium/Tall), and the app classifies it via rule-based geometry (no ML) into one of five terrain archetypes: Wall/Barricade, Spire/Chokepoint, Rubble Cover, Plain Obstacle, or Watchtower (bonus tier for the tallest object on the board). A colored placeholder primitive is spawned over the real object.
 - Undo last object / delete-mode (tap a placed object to remove it) during Fortify.
 - A blue outline showing the actual boundary of the detected table plane.
-- **Siege phase** — once Fortify is done, a synthetic ground area and a stand-in "enemy base" are placed, a NavMesh is baked over the table (terrain objects carve out obstacles automatically), a simple resource economy ticks over time, and tapping the table deploys a unit that paths around your terrain toward the base.
+- **Muster phase** — free stationary garrison units auto-spawn at chokepoint/Watchtower terrain once Fortify ends, rewarding good terrain-building.
+- **Siege phase** — a synthetic ground area and a stand-in "enemy base" (with real hit points) are placed, a NavMesh is baked over the table (terrain objects carve out obstacles automatically), a resource economy ticks over time, and tapping the table deploys a unit that paths toward the base. Deploy has two modes — Direct (fast, open route) and Covered (slower, hugs cover terrain to avoid garrison fire) — a genuine risk/speed trade-off, not just a cosmetic path difference.
+- **Win condition** — the base has real HP, deployed units damage it on arrival, and destroying it stops the match and fires a win event.
+- **RevenueCat integration** — SDK installed, dashboard configured (entitlement, offering, product), and one real Pro-gated cosmetic feature (a second terrain color palette) works correctly in Unity Editor Play Mode. See `plan.md` Section 6 for exact IDs and current status.
 
 **Known limitations (by design, for now):**
 - Only **one generic placeholder unit type** exists — no combat, no unit variety yet.
-- The "enemy base" is a fixed stand-in, not a real opponent — **two-device play (Cloud Anchor sync) hasn't been built yet**, so this is currently a solo/practice loop only.
+- The "enemy base" is a fixed stand-in, not a real opponent — **two-device play (Cloud Anchor sync) hasn't been built yet**, so this is currently a solo/practice loop only. No Lose condition exists yet for the same reason.
 - Terrain visuals are flat colored primitives, not real art — intentional placeholder per the design doc's "Cartoonify" step, deferred to a later polish pass.
-- Pathing currently always takes the shortest route; there's no "safe route through cover vs. fast route around the outside" behavior yet.
+- **RevenueCat purchases don't yet complete on a real Android device** — the product only exists on RevenueCat's Test Store app, and real device builds always go through actual Google Play Billing, which needs a real Google Play Console product. That account/product setup is in progress; the code and dashboard side are otherwise complete.
 
 **Not started yet:**
-- RevenueCat SDK integration / in-app purchase (a hard submission requirement).
 - Two-device Cloud Anchor cross-device sync.
 - Camera-height trade-off mechanic.
-- Auto-garrison-on-chokepoints (Muster phase, per plan.md).
 - Demo video, app icon, screenshots, and other Devpost submission assets.
 
 ## Tech stack
@@ -38,12 +39,17 @@ Full game design — mechanics, terrain classification rules, monetization, time
 ## Project structure
 
 ```
-Assets/Scripts/
+Assets/Scripts/                    - ScrapSiege.Runtime.asmdef (named assembly, referenced by Tests)
   AR/       - AR session/plane helpers (PlaneOutlineVisualizer, CloudAnchorManager stub, debug HUD)
-  Terrain/  - Fortify phase: classification, spawning, corner-tap input handling
-  Siege/    - Siege phase: phase handoff, resource economy, unit deployment, unit pathing
+  Terrain/  - Fortify phase: classification, spawning, corner-tap input handling, NavMeshAreas
+  Siege/    - Siege phase: phase handoff, resource economy, unit deployment/pathing, win condition,
+              Muster/garrison, BaseHealth
+  Monetization/ - ProEntitlement.cs only: the decoupled Pro-status gate gameplay code reads
+Assets/Monetization/                - deliberately OUTSIDE ScrapSiege.Runtime.asmdef - see plan.md
+                                       Section 6 for why. MonetizationManager.cs, PaywallController.cs
+Assets/Tests/EditMode/              - automated tests for TerrainClassifier (Window > Test Runner)
 Assets/Prefabs/
-  GroundQuad, DummyBase, SiegeUnit  - runtime-instantiated during Siege
+  GroundQuad, DummyBase, SiegeUnit, GarrisonUnit  - runtime-instantiated during Siege
 Assets/Scenes/
   ARTest.unity - the one scene the whole current loop runs in
 ```

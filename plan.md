@@ -113,14 +113,25 @@ Instead of a passive mana bar that fills over time (Clash Royale's model), resou
 
 This is designed as genuine value-tier gating (more content, not functionality lockout), matching what RevenueCat's judging criteria tend to reward.
 
+### Implementation status (as of 2026-08-04)
+
+Dashboard and code are both built; on-device purchases are blocked only on a real Google Play Console product (see below), not on any remaining engineering work.
+
+- **RevenueCat project:** "ScrapSiege" (`proj3a523262`). Entitlement `pro` gates the one shipped Pro feature so far: a second, more saturated terrain color palette (`TerrainObjectSpawner.ProColorForArchetype`) — a real cosmetic reskin, not a functionality lock, per the design above.
+- **Two RevenueCat apps exist:**
+  - **Test Store** (`appda5538b8e2`) — has a real product (`scrap_siege_pro_monthly`, $2.99/mo), attached to `pro`, in the `default` offering's `$rc_monthly` package. Works correctly in **Unity Editor Play Mode** (mock wrapper), but a real Android device build always goes through actual Google Play Billing regardless of which RevenueCat app the API key belongs to — Test Store products don't resolve there. Confirmed via on-device logcat: `ConfigurationError - None of the products registered in the RevenueCat dashboard could be fetched from the Play Store.`
+  - **Play Store** (`appa37d9670f8`, package `com.mikhilnaika.scrapsiege`) — app entry created, **no product yet**. Blocked on a Google Play Console developer account (user is getting this separately - not required for Next Gen's store-listing-free submission, purely needed to make Play Billing recognize a real product on-device).
+- **Naming convention reserved for the real product:** create it in Play Console as a subscription with product ID `scrap_siege_pro` and base plan ID `monthly`, so the RevenueCat store identifier comes out to `scrap_siege_pro:monthly` — this lets it be registered and attached to the existing `pro` entitlement/`$rc_monthly` package without renaming anything already built.
+- **Unity-side code:** `Assets/Monetization/MonetizationManager.cs` (SDK config/offerings/purchase/restore) and `PaywallController.cs` (paywall UI logic), kept deliberately outside `Assets/Scripts/ScrapSiege.Runtime.asmdef` since the RevenueCat SDK ships with no `.asmdef` of its own. `Assets/Scripts/Monetization/ProEntitlement.cs` is the one-way decoupled gate gameplay code reads instead of touching the SDK directly.
+
 ## 7. Timeline (6 weeks, risk-ordered)
 
 Front-loaded so the highest-risk, most novel technical piece (cross-device Cloud Anchors) is validated in week 1, not discovered as broken in week 4.
 
 - **Week 1:** Unity + AR Foundation project setup, basic plane detection working. **Cloud Anchor cross-device spike** — get two Android devices (different brands if possible, e.g. Honor + a second Android phone) sharing a single anchor point successfully. iOS cross-platform testing is deferred (see Section 8 note) — Android-to-Android is the priority to validate first. Optional: quick spike on gesture-based summoning to decide go/no-go.
-- **Week 2:** Single-player core loop — terrain scanning (Mechanic 1), unit placement, wave/resource economy, basic pathing.
-- **Week 3:** Two-device competitive sync — broadcasting game state between the two anchored sessions; camera-height mechanic (Mechanic 2) implemented.
-- **Week 4:** RevenueCat integration — offerings, entitlements, paywall UI, unlockable content wired in.
+- **Week 2 (done 2026-08-03):** Single-player core loop — terrain scanning (Mechanic 1), unit placement, wave/resource economy, basic pathing, plus win condition, Muster/auto-garrison, and route-variety pathing.
+- **Week 3 (not started):** Two-device competitive sync — broadcasting game state between the two anchored sessions; camera-height mechanic (Mechanic 2) implemented. Blocked on having a second Android device.
+- **Week 4 (in progress, started 2026-08-04 ahead of Week 3 since it didn't need a second device):** RevenueCat integration — dashboard, entitlement, offering, paywall UI, and the Pro cosmetic palette are all built and working (in Editor Play Mode / Test Store). Real on-device purchases are blocked only on a Google Play Console product - see Section 6.
 - **Week 5:** Polish — VFX, sound design, terrain-scan robustness/occlusion handling, difficulty balancing, UI/UX pass.
 - **Week 6 (buffer):** Real playtests with two physically different phone brands, demo video shoot + edit, repo cleanup for public visibility, icon + screenshots + submission assets.
 

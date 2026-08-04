@@ -1,6 +1,6 @@
 ﻿<Solution>
   <Project Path="ScrapSiege.Runtime.csproj" />
+  <Project Path="Assembly-CSharp.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
   <Project Path="ScrapSiege.EditModeTests.csproj" />
-  <Project Path="Assembly-CSharp.csproj" />
 </Solution>
