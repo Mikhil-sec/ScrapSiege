@@ -30,6 +30,9 @@ namespace ScrapSiege.Siege
         [SerializeField] private float dummyBaseDistance = 2f;
         [SerializeField] private float groundQuadSize = 4f;
 
+        /// <summary>Fires once Siege is fully live - used by the HUD to swap phase panels.</summary>
+        public UnityEngine.Events.UnityEvent OnSiegeStarted;
+
         private readonly List<ARRaycastHit> hits = new List<ARRaycastHit>();
 
         public Transform DummyBase { get; private set; }
@@ -90,6 +93,8 @@ namespace ScrapSiege.Siege
 
             resourceEconomy.enabled = true;
             deploymentController.enabled = true;
+
+            OnSiegeStarted?.Invoke();
         }
 
         /// <summary>

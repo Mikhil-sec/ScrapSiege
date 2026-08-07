@@ -35,12 +35,17 @@ namespace ScrapSiege.Terrain
         public UnityEvent OnAwaitingSecondCorner;
         public UnityEvent OnAwaitingHeightPick;
         public UnityEvent<int> OnObjectCount;
+        public UnityEvent<bool> OnDeleteModeChanged;
 
         private State state = State.WaitingFirstCorner;
         private bool deleteMode;
         private TerrainObjectSpawner spawner;
         private readonly List<ARRaycastHit> hits = new List<ARRaycastHit>();
         private readonly List<TerrainObjectData> scannedObjects = new List<TerrainObjectData>();
+
+        // Set by PlaneLockController once the player commits to a table. Corner taps are
+        // restricted to this plane so a stray floor plane behind the table can't swallow a tap.
+        private TrackableId lockedPlaneId = TrackableId.invalidId;
 
         /// <summary>Final scanned terrain, valid after FinishFortify() - used by MusterPhaseController.</summary>
         public IReadOnlyList<TerrainObjectData> ScannedObjects => scannedObjects;
@@ -81,9 +86,7 @@ namespace ScrapSiege.Terrain
 
             if (state == State.WaitingHeightPick) return;
 
-            if (!raycastManager.Raycast(screenPos, hits, TrackableType.PlaneWithinPolygon)) return;
-
-            Vector3 worldPos = hits[0].pose.position;
+            if (!TryRaycastLockedPlane(screenPos, out Vector3 worldPos)) return;
 
             if (state == State.WaitingFirstCorner)
             {
@@ -111,6 +114,42 @@ namespace ScrapSiege.Terrain
                 SetHeightPickButtonsVisible(true);
                 OnAwaitingHeightPick?.Invoke();
             }
+        }
+
+        /// <summary>
+        /// Raycast that honours the locked board. AR raycast hits come back sorted nearest-first,
+        /// so this walks them in order and takes the first one that belongs to the locked plane -
+        /// a tap that only lands on some other surface is ignored entirely rather than silently
+        /// placing terrain on the floor behind the table.
+        /// </summary>
+        private bool TryRaycastLockedPlane(Vector2 screenPos, out Vector3 worldPos)
+        {
+            worldPos = default;
+            if (!raycastManager.Raycast(screenPos, hits, TrackableType.PlaneWithinPolygon)) return false;
+
+            if (lockedPlaneId == TrackableId.invalidId)
+            {
+                worldPos = hits[0].pose.position;
+                return true;
+            }
+
+            for (int i = 0; i < hits.Count; i++)
+            {
+                if (hits[i].trackableId != lockedPlaneId) continue;
+
+                worldPos = hits[i].pose.position;
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Called by PlaneLockController on lock (and with null on rescan). Restricts corner and
+        /// delete taps to the one plane the player committed to.
+        /// </summary>
+        public void SetLockedPlane(ARPlane plane)
+        {
+            lockedPlaneId = plane != null ? plane.trackableId : TrackableId.invalidId;
         }
 
         /// <summary>Wire to a "Short" height-pick button.</summary>
@@ -152,15 +191,43 @@ namespace ScrapSiege.Terrain
             OnObjectCount?.Invoke(scannedObjects.Count);
         }
 
+        /// <summary>
+        /// Removes every placed object at once. Used when PlaneLockController rescans - the
+        /// terrain was positioned against the plane that's being discarded, so keeping it would
+        /// leave objects floating relative to whatever plane gets locked next.
+        /// </summary>
+        public void ClearAllObjects()
+        {
+            foreach (var obj in scannedObjects)
+            {
+                if (obj.Visual != null) Destroy(obj.Visual);
+                if (obj.CoverVolume != null) Destroy(obj.CoverVolume);
+            }
+            scannedObjects.Clear();
+
+            CancelPendingPlacement();
+            SetDeleteMode(false);
+
+            OnObjectCount?.Invoke(0);
+            OnAwaitingFirstCorner?.Invoke();
+        }
+
         /// <summary>Wire to a "Delete Object" toggle button - while active, tapping a placed object removes it.</summary>
         public void ToggleDeleteMode() => SetDeleteMode(!deleteMode);
 
         public void SetDeleteMode(bool enable)
         {
             deleteMode = enable;
+            OnDeleteModeChanged?.Invoke(deleteMode);
+
             if (!deleteMode) return;
 
             // Entering delete mode mid-placement abandons whatever corner/height pick was in progress.
+            CancelPendingPlacement();
+        }
+
+        private void CancelPendingPlacement()
+        {
             if (cornerAMarker != null)
             {
                 Destroy(cornerAMarker);
@@ -198,13 +265,16 @@ namespace ScrapSiege.Terrain
         /// <summary>Wire to a "Done Fortifying" button to end the phase.</summary>
         public void FinishFortify()
         {
+            // A half-placed object (one corner tapped, or a height pick still open) would
+            // otherwise leave its marker sphere floating over the board all through Siege.
+            CancelPendingPlacement();
+
             TerrainClassifier.ApplyWatchtowerOverride(scannedObjects);
             enabled = false;
 
-            // ARCore keeps refining/extending plane boundaries as it tracks more of the room,
-            // including mid-Siege as the camera pans. Terrain and NavMesh are locked in by now,
-            // so further plane growth only causes visual drift (planes stretching across the
-            // table or through furniture) - freeze detection instead of letting it keep updating.
+            // PlaneLockController already froze detection when the board was locked; this stays
+            // as a safety net so Fortify can never hand off to Siege with ARCore still free to
+            // refine and extend plane boundaries under the baked NavMesh.
             if (planeManager != null)
                 planeManager.requestedDetectionMode = PlaneDetectionMode.None;
         }

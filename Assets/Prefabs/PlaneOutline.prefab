@@ -74,7 +74,7 @@ LineRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 0}
+  - {fileID: 2100000, guid: 240522c62e3241847ae080a77b6c3081, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -170,5 +170,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 18c3b9cb95a37dc4986c023e63167994, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ScrapSiege.AR.PlaneOutlineVisualizer
-  outlineColor: {r: 0.2, g: 0.6, b: 1, a: 1}
+  scanningColor: {r: 0.29, g: 0.66, b: 1, a: 1}
+  lockedColor: {r: 1, g: 0.54, b: 0.24, a: 1}
   lineWidth: 0.005
+  lockedLineWidth: 0.007
+  pulseDepth: 0.45
+  pulseSpeed: 2.2
+  lineMaterial: {fileID: 2100000, guid: 240522c62e3241847ae080a77b6c3081, type: 2}
