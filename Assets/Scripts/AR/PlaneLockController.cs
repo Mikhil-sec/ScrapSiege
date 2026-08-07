@@ -28,11 +28,18 @@ namespace ScrapSiege.AR
         [SerializeField] private FortifyInputController fortify;
 
         [Header("Lock rules")]
-        [Tooltip("Smallest polygon area (m^2) accepted as a table. 0.06 is roughly a 25cm square.")]
-        [SerializeField] private float minLockableArea = 0.06f;
+        [Tooltip("Smallest polygon area (m^2) accepted as a table. 0.02 is roughly a 14cm square - " +
+                 "deliberately small, because ARCore grows a plane outward from a tiny seed and the " +
+                 "player should be able to commit as soon as the board is plausibly covered.")]
+        [SerializeField] private float minLockableArea = 0.02f;
 
         [Tooltip("How often (seconds) to re-evaluate whether a lockable plane exists.")]
         [SerializeField] private float candidatePollInterval = 0.25f;
+
+        [Header("Diagnostics")]
+        [Tooltip("Log why no plane is lockable yet. Pull with: adb logcat -d -s Unity:V")]
+        [SerializeField] private bool logScanDiagnostics = true;
+        [SerializeField] private float diagnosticIntervalSeconds = 2f;
 
         [Header("Events")]
         public UnityEvent OnScanStarted;
@@ -52,6 +59,7 @@ namespace ScrapSiege.AR
         private bool lastLockReady;
         private float lastReportedArea = -1f;
         private float nextPollTime;
+        private float nextDiagnosticTime;
 
         private void Awake()
         {
@@ -113,6 +121,42 @@ namespace ScrapSiege.AR
                 lastReportedArea = area;
                 OnMappedAreaChanged?.Invoke(area);
             }
+
+            if (!ready) LogScanDiagnostics();
+        }
+
+        /// <summary>
+        /// Explains, in logcat, exactly why nothing is lockable yet. "Lock stays grey" has three
+        /// completely different causes - ARCore has found nothing at all, it has found only
+        /// vertical/downward surfaces, or it has a horizontal one that is still too small - and
+        /// they are indistinguishable from the phone screen.
+        /// </summary>
+        private void LogScanDiagnostics()
+        {
+            if (!logScanDiagnostics || planeManager == null) return;
+            if (Time.time < nextDiagnosticTime) return;
+            nextDiagnosticTime = Time.time + diagnosticIntervalSeconds;
+
+            int total = 0;
+            var sb = new System.Text.StringBuilder("[PlaneLock] no lockable plane. detectionMode=");
+            sb.Append(planeManager.requestedDetectionMode).Append(" planes=");
+
+            foreach (var plane in planeManager.trackables)
+            {
+                total++;
+                sb.Append("\n  id=").Append(plane.trackableId)
+                  .Append(" align=").Append(plane.alignment)
+                  .Append(" state=").Append(plane.trackingState)
+                  .Append(" area=").Append(PolygonArea(plane).ToString("0.000"))
+                  .Append("m2 subsumed=").Append(plane.subsumedBy != null)
+                  .Append(" boundaryPts=").Append(plane.boundary.Length);
+            }
+
+            if (total == 0) sb.Append("0 - ARCore has not mapped ANY surface yet (lighting/texture/motion).");
+            else sb.Insert(sb.ToString().IndexOf("planes=") + 7, total.ToString());
+
+            sb.Append("\n  need: alignment=HorizontalUp, not subsumed, area >= ").Append(minLockableArea).Append("m2");
+            Debug.Log(sb.ToString());
         }
 
         /// <summary>Wire to the "Lock Table" button.</summary>
@@ -146,6 +190,20 @@ namespace ScrapSiege.AR
 
             OnLockReadyChanged?.Invoke(false);
             OnPlaneLocked?.Invoke();
+        }
+
+        /// <summary>
+        /// Stops plane detection without locking anything. Used by the joining player, who never
+        /// locks a plane but still must not have ARCore refining surfaces underneath an already
+        /// agreed board - the same drift problem locking solves for the host.
+        /// </summary>
+        public void FreezeDetection()
+        {
+            if (planeManager != null)
+                planeManager.requestedDetectionMode = PlaneDetectionMode.None;
+
+            logScanDiagnostics = false;
+            OnLockReadyChanged?.Invoke(false);
         }
 
         /// <summary>

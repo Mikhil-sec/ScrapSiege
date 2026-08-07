@@ -7,109 +7,116 @@ technical/design detail stays in `plan.md`; this file is the story judges actual
 ## Inspiration
 
 We wanted something genuinely original for RevenueCat Shipaton's Next Gen track — not
-another AI-wrapper app. Two earlier directions were rejected before this one: an
+another AI-wrapper app. Two directions were rejected before we wrote any real code: an
 AI-generated-content app (killed on principle — we wanted zero AI features, not another
 "AI-powered" pitch), and a real-world radar tag game using Ultra-Wideband ranging (killed
 because UWB hardware is inconsistent across iPhone, Samsung, and Honor — the exact three
-brands common where we live). That second failure led to the real spark: AR plane-tracking
-works across nearly every modern phone, no special hardware needed. Instead of a
-fast-moving outdoor game fighting hardware fragmentation, what if the "arena" was just
-whatever's already sitting on a table — and the battle was slow and tactical instead of
-twitchy? Scrap Siege is what came out of asking that question.
+brands common where we live). That second failure led to the spark: AR plane-tracking works
+on nearly every modern phone with no special hardware. What if the arena was a real table,
+and the battle was slow and tactical instead of twitchy?
 
 ## What it does
 
-Two players arrange real objects from their table — mugs, books, phone stands, whatever's
-around — as terrain. The app scans the arrangement and classifies each object by its
-**shape** (never what it actually is) into a gameplay archetype: tall and narrow becomes a
-chokepoint, short and wide becomes cover, long and thin becomes a wall. No two matches are
-ever on the same layout, because no two tables have the same junk on them. Once terrain is
-set, a short Muster phase auto-garrisons defenders at the chokepoints players built, then
-players fight a real-time skirmish — deploying units with a resource economy, choosing
-between a fast open route or a slower route that hugs cover terrain to avoid garrison fire,
-until one base falls.
+Scrap Siege projects a hand-designed battlefield onto any flat real surface — a desk, a
+dining table, the floor — at real scale, and you fight a rule-based AI commander across it.
+
+The part a flat screen can't copy is that **your phone's physical position is a tactical
+resource**. Lean in close and your unit placement is precise but you can only see one
+corner of the board. Pull back and you can read the whole fight, but your troops land
+loosely. Enemy units are only revealed when there's genuine line of sight from where you're
+actually standing, so a virtual wall really does hide what's behind it — and peeking round
+it means physically leaning. Deploy is a further trade-off: a fast, exposed direct route, or
+a slower one that hugs cover to stay out of garrison fire.
 
 ## How we built it
 
-Unity 6 with AR Foundation as the cross-platform layer over ARCore/ARKit, targeting Android
-first since that's the phone actually available for daily testing (an Honor device with no
-depth sensor — this shaped the whole terrain-detection design toward manual, tap-to-tag
-input as the primary path, not a fallback for lesser hardware). Terrain classification is
-pure rule-based computational geometry — bounding box, height category, footprint aspect
-ratio — with zero machine learning anywhere in the pipeline, by design. Pathing uses Unity's
-NavMesh with custom area costs so a "safer" route through cover terrain is a genuine
-distance/risk trade-off, not just a different-looking line. Monetization runs on the
-RevenueCat Unity SDK, configured through the RevenueCat MCP server directly against our own
-dashboard — one entitlement gates a real cosmetic feature (a second terrain color palette),
-not a placeholder toggle. We leaned heavily on Claude Code as a coding partner, including
-letting it operate the live Unity Editor directly through a Unity MCP connection once one was
-available, but held every gameplay claim to the same bar regardless of who typed the code:
-nothing is "done" until it's been tested on the real device and, where behavior looked wrong,
-confirmed against `adb logcat` rather than guessed from reading the code.
+Unity 6 with AR Foundation over ARCore, Android-first because that's the hardware actually
+available for daily testing — two phones, neither with a depth sensor, which ruled out every
+depth-based shortcut from day one. Pathing uses Unity's NavMesh with custom area costs, so
+the "safer" route through cover is a genuine distance/risk trade-off rather than a
+differently-coloured line. Monetization runs on the RevenueCat Unity SDK, configured through
+the RevenueCat MCP server directly against our own dashboard: one entitlement gating real
+content, not a placeholder toggle.
+
+There is **zero machine learning anywhere in the app**, deliberately. The AI commander is
+ordinary game AI — explicit thresholds and utility scoring, hand-written and debuggable. We
+think that's a feature: it never behaves unpredictably on camera, which matters when the
+whole thing has to survive a two-minute demo video.
+
+We leaned heavily on Claude Code as a coding partner, including letting it operate the live
+Unity Editor directly through a Unity MCP connection, but held every claim to the same bar
+regardless of who typed the code: nothing counted as done until it ran on the real device,
+and where behaviour looked wrong we confirmed it against `adb logcat` instead of guessing.
 
 ## Challenges we ran into
 
 - **Hardware fragmentation killed our first concept outright** (UWB), which is what pushed
   us toward AR in the first place.
-- **Our only daily test device has no depth sensor**, so the "ideal" automatic terrain
-  scanning was never an option — the manual tap-to-tag system had to be the real primary
-  path from day one.
 - **A OneDrive-synced project folder silently broke Unity's build pipeline** through file
   locking; the fix was relocating the whole project to local-only storage.
-- **Several bugs were invisible from code alone and only showed up on-device**: URP quietly
-  drops camera passthrough without an explicit Renderer Feature; NavMesh settings tuned for
-  humanoid-scale games were wildly wrong at tabletop scale (a default 5cm agent radius was
-  blocking gaps that looked wide open on screen); a Unity Inspector event-wiring mistake made
-  a working resource counter always display zero.
-- **The sneakiest one:** a full win condition was implemented and the base correctly reached
-  zero health and fired its destroy event — but a missing Inspector reference crashed the
-  very next line before the win screen could ever show. It took pulling `adb logcat`
-  mid-test to prove the win logic was actually fine and find the real, one-line cause.
-- **RevenueCat integration surfaced a genuine Unity lifecycle trap:** the SDK's internal
-  state is only allocated in its own `Start()`, so configuring it from another script's
-  `Awake()` — which runs earlier for the whole scene, before any `Start()` — threw a null
-  reference that only appeared on-device. A second, independent failure (auto-configuring
-  itself with empty keys unless a specific flag is set) was stacked on top of the first,
-  so the fix needed both a forced execution order and a one-line Inspector flag, not just one
-  patch. Diagnosed the same way as everything else here: real device, real logcat, no
-  guessing.
-- **A real purchase still can't complete on a physical device without a Google Play Console
-  product** — RevenueCat's free Test Store is enough to validate every line of purchase-flow
-  code in the Unity Editor, but real Android devices always go through actual Google Play
-  Billing, which won't recognize a product that only exists in a test sandbox.
+- **Several bugs were invisible from code alone and only appeared on-device.** URP quietly
+  drops camera passthrough without an explicit Renderer Feature. NavMesh settings tuned for
+  humanoid-scale games were wildly wrong at tabletop scale — a default 5cm agent radius was
+  blocking gaps that looked wide open on screen. A Unity Inspector event-wiring trap made a
+  perfectly working resource counter permanently display zero.
+- **The sneakiest bug of the project:** a win condition where the base correctly reached zero
+  health and fired its destroy event — but a missing Inspector reference threw on the very
+  next line, before the win screen could appear. Only pulling `adb logcat` mid-test proved
+  the win logic was fine and found the real one-line cause. Much later, the same *class* of
+  bug reappeared: a null-reference in a UI script's `OnEnable` aborted the rest of the
+  method, silently unregistering half the game's event listeners on every single launch. The
+  visible symptom was a button that looked broken; the button was fine.
+- **RevenueCat surfaced a genuine Unity lifecycle trap:** the SDK's internal state is only
+  allocated in its own `Start()`, so configuring it from another script's `Awake()` threw a
+  null reference that only appeared on-device — with a second, independent failure stacked on
+  top of it.
+- **The biggest one: we built a two-player game and then cut it.** Weeks of work went into
+  a full LAN implementation — Netcode for GameObjects over direct local network, UDP host
+  discovery, a cloud-free shared coordinate frame where both players tap the same two real
+  objects to agree on where the board is, server-authoritative replicated terrain with
+  half-of-table ownership, and a host-authoritative siege with per-player bases and
+  resources. It all worked as code. What defeated it was the layer underneath: **AR plane
+  detection could not reliably produce a usable surface** across a floor, a cushioned table
+  and a dining table. Every attempt to make co-location robust ran into the same foundation
+  being unreliable, and a two-player match can't start until both devices agree on where the
+  board is.
 
 ## Accomplishments that we're proud of
 
-- A fully playable single-player core loop, confirmed working end-to-end on real
-  hardware — not just in the Unity Editor: scan real clutter into terrain, watch the
-  classification hold up, deploy troops, and watch a base actually fall.
-- Terrain classification is 100% deterministic geometry, with real design discipline behind
-  keeping it that way instead of reaching for an easy ML shortcut.
-- A route-choice mechanic (fast-and-exposed vs. slow-and-covered) that gives real tactical
-  weight to how players physically build their terrain, not just how they spend resources.
-- A debugging habit that consistently found true root causes on real hardware instead of
-  guessing from code review alone.
-- Real monetization plumbing, not a mockup — a working entitlement, offering, and a genuine
-  Pro-gated cosmetic feature, verified end-to-end in Editor Play Mode ahead of the real
-  store listing that Next Gen doesn't even require.
+- **Knowing when to cut.** The two-player build wasn't abandoned because it was hard or
+  unfinished — it was abandoned because measurement showed the foundation underneath it was
+  unreliable, and shipping something honest mattered more than shipping the original plan. It
+  is preserved on a branch rather than deleted, and the pivot removed both of the project's
+  worst dependencies at once.
+- A debugging habit that consistently found true root causes on real hardware — via logcat,
+  on the device — rather than guessing from code review.
+- A route-choice mechanic (fast-and-exposed vs. slow-and-covered) with real tactical weight,
+  driven entirely by NavMesh area costs rather than bespoke pathfinding.
+- Real monetization plumbing, not a mockup: a working entitlement, offering, and a genuine
+  Pro-gated feature, verified end-to-end in Editor Play Mode.
+- Holding the zero-ML line all the way through, including for the opponent AI, when reaching
+  for a model would have been the easy story to tell in 2026.
 
 ## What we learned
 
-- Bugs on real hardware often look nothing like their actual cause — several "this feature
-  is just broken" moments turned out to be a single miscalibrated Editor setting, invisible
-  from reading the script.
-- Designing for the worst available device first (no depth sensor) instead of the best one
-  produced a more robust system overall, not a lesser one.
-- A defensive null-check that quietly does nothing instead of crashing can hide a real bug
-  for an entire test session — failing loudly is almost always better than failing silently.
+- **Bugs on real hardware often look nothing like their cause.** Twice, a broken-looking
+  button turned out to be an exception in a completely different script that had silently
+  aborted a chunk of setup.
+- **Test the riskiest assumption before building on top of it.** We validated cross-device
+  networking thoroughly and the AR surface detection underneath it barely at all. The layer
+  we didn't stress-test is the one that ended the direction.
+- **Designing for the worst available device first** produced a more robust system than
+  designing for the best one would have.
+- A defensive null-check that quietly does nothing can hide a real bug for an entire test
+  session — failing loudly is almost always better than failing silently.
 
 ## What's next for Scrap Siege
 
-- A Google Play Console product to let the already-built purchase flow actually complete on
-  a real device, not just in the Editor.
-- Two-device Cloud Anchor sync and the camera-height tactical trade-off (blocked on getting
-  a second Android test device).
-- An art and animation polish pass over the current placeholder terrain and paywall visuals.
-- A demo video, public repo cleanup, and full submission assets.
-- A possible redesign of the garrison from an automatic freebie into a capturable, contested
-  point — once a real opponent exists to contest it against.
+- Board placement and authored level definitions, replacing the old scanning flow.
+- The AI commander, plus the player-side base and lose condition.
+- The two mechanics the whole design now rests on: camera-height vantage, and true
+  line-of-sight from the player's real viewpoint.
+- Pro level packs behind the already-built entitlement, and a Google Play Console product so
+  a real purchase can complete on a device rather than only in the Editor.
+- An art and animation pass over the placeholder terrain, then the demo video and submission
+  assets.

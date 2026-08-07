@@ -1,78 +1,96 @@
 # Scrap Siege
 
-An augmented-reality tabletop battle game — two players build their battlefield out of whatever's actually sitting on their table (a mug, a book, a phone stand), then fight a real-time skirmish across it. No two matches are ever on the same map, because no two tables have the same junk on them.
+A single-player augmented-reality tabletop war game. Point your phone at any flat surface — a desk, a dining table, the floor — and a hand-designed battlefield is projected onto it at real scale. Then out-think an AI commander by physically moving around the board: lean in to place troops precisely, pull back to read the whole fight, and step around the table to see what a wall is hiding.
 
 Built for **RevenueCat Shipaton 2026** (Next Gen / student track).
 
-Full game design — mechanics, terrain classification rules, monetization, timeline — lives in [`plan.md`](plan.md). That's the source of truth for *why* things work the way they do; this file is the practical "what's built, how to run it" overview.
+Full game design — mechanics, level format, AI behaviour, monetization, timeline — lives in [`plan.md`](plan.md). That's the source of truth for *why* things work the way they do; this file is the practical "what's built, how to run it" overview.
+
+> **This project pivoted on 2026-08-07.** It was previously a two-player game where each player scanned real objects on their table as terrain, synced over a LAN. That implementation was completed and works as code, but AR plane detection could not reliably produce a lockable surface across floor, cushion table or dining table, which made the shared-board step too fragile to build a match on. It is preserved on the **`two-player-archive`** branch, not deleted. See `plan.md` Section 2 for the full reasoning.
 
 ## Current status
 
-**Working end-to-end today:**
+### Working today (carried over from the pre-pivot build)
 
-- **Scan phase** — AR plane detection (ARCore/AR Foundation), validated on Android with no depth sensor required. Mapped surfaces are drawn with a pulsing blue boundary outline and the HUD reports their real polygon area (`0.34 m²`). When the table looks right, **Lock This Table** commits to exactly one plane: detection freezes so ARCore can't keep growing or drifting the board mid-match, and every other plane is hidden. **Rescan** reverses it and returns to detection (it also clears any terrain already placed, since that terrain was positioned against the discarded plane). The locked plane's outline turns solid amber.
-- **Fortify phase** — tap two corners of a real object on the live camera view, pick a height (Short/Medium/Tall), and the app classifies it via rule-based geometry (no ML) into one of five terrain archetypes: Wall/Barricade, Spire/Chokepoint, Rubble Cover, Plain Obstacle, or Watchtower (bonus tier for the tallest object on the board). A colored placeholder primitive is spawned over the real object. Corner taps are restricted to the locked plane.
-- Undo last object / delete-mode (tap a placed object to remove it) during Fortify.
-- **Muster phase** — free stationary garrison units auto-spawn at chokepoint/Watchtower terrain once Fortify ends, rewarding good terrain-building.
-- **Siege phase** — a synthetic ground area and a stand-in "enemy base" (with real hit points) are placed, a NavMesh is baked over the table (terrain objects carve out obstacles automatically), a resource economy ticks over time, and tapping the table deploys a unit that paths toward the base. Deploy has two modes — Direct (fast, open route) and Covered (slower, hugs cover terrain to avoid garrison fire) — a genuine risk/speed trade-off, not just a cosmetic path difference.
-- **Win condition** — the base has real HP, deployed units damage it on arrival, and destroying it stops the match and fires a win event.
-- **RevenueCat integration** — SDK installed, dashboard configured (entitlement, offering, product), and one real Pro-gated cosmetic feature (a second terrain color palette) works correctly in Unity Editor Play Mode. See `plan.md` Section 6 for exact IDs and current status.
-- **Designed HUD** — one status card carrying the current step and the next instruction, a bottom action bar that swaps between the three phases, a scrap counter chip, and modal cards for the paywall and the victory screen. Built on a single palette and one generated 9-sliced rounded-rect sprite (`Assets/UI/Generated/`), scaled with `Scale With Screen Size` at 1080×1920 and inset to `Screen.safeArea` so nothing sits under a notch or gesture bar.
+- **Scan phase** — AR plane detection (ARCore/AR Foundation), no depth sensor required. Detected surfaces get a pulsing blue boundary outline and the HUD reports their real polygon area. **Lock This Table** commits to exactly one plane, freezes detection so ARCore can't keep growing or drifting it, and hides every other plane; **Rescan** reverses that. Scan failures log a diagnostic every 2s (plane count, per-plane alignment/area/tracking state) so a grey Lock button is explainable rather than mysterious.
+- **Siege phase** — a ground area and a destroyable base are placed, a NavMesh is baked (terrain carves obstacles automatically), a resource economy ticks, and tapping deploys a unit that paths toward the base. Deploy has two modes — **Direct** (shortest open route) and **Covered** (detours through cover to avoid garrison fire) — a genuine risk/speed trade-off driven by NavMesh area costs, not a cosmetic difference.
+- **Muster** — free stationary garrison units auto-spawn at chokepoint/Watchtower terrain, and only damage units *not* standing in a cover lane.
+- **Win condition** — the base has real HP, units damage it on arrival, destroying it ends the match.
+- **RevenueCat integration** — SDK installed, dashboard configured (entitlement, offering, product), and one real Pro-gated cosmetic (a saturated terrain palette) works in Unity Editor Play Mode. See `plan.md` Section 7 for IDs and current status.
+- **Designed HUD** — status card carrying the current step and next instruction, a bottom bar that cross-fades between phases, a scrap counter chip, and modal cards for the paywall and victory screen. One palette, one procedurally generated 9-sliced sprite, `Scale With Screen Size` at 1080×1920, inset to `Screen.safeArea`.
 
-**Known limitations (by design, for now):**
+### Not built yet — the new direction
 
-- Only **one generic placeholder unit type** exists — no combat, no unit variety yet.
-- The "enemy base" is a fixed stand-in, not a real opponent — **two-device play (Cloud Anchor sync) hasn't been built yet**, so this is currently a solo/practice loop only. No Lose condition exists yet for the same reason.
-- Terrain visuals are flat colored primitives, not real art — intentional placeholder per the design doc's "Cartoonify" step, deferred to a later polish pass.
-- **RevenueCat purchases don't yet complete on a real Android device** — the product only exists on RevenueCat's Test Store app, and real device builds always go through actual Google Play Billing, which needs a real Google Play Console product. That account/product setup is in progress; the code and dashboard side are otherwise complete.
+Everything specific to the single-player pivot. In `plan.md` Section 8 order:
 
-**Not started yet:**
+- **Board placement** — tap to drop the map on the locked surface, drag/rotate/scale, confirm. Replaces the terrain-scanning Fortify phase.
+- **`LevelDefinition` ScriptableObjects** — authored maps in normalised board space, so adding content needs no code.
+- **AI commander** — rule-based opponent with its own base and economy.
+- **Player base + Lose condition** — still missing; nothing currently damages the player back.
+- **Vantage mechanic** — camera height drives deploy precision vs. field of view.
+- **True line of sight** — enemies revealed only when actually visible from the camera, with last-known-position markers.
+- Level select, star ratings, terrain art, VFX/sound, demo video and submission assets.
 
-- Two-device Cloud Anchor cross-device sync.
-- Camera-height trade-off mechanic.
-- Demo video, app icon, screenshots, and other Devpost submission assets.
+### Known limitations
+
+- Only **one generic placeholder unit type** — no combat variety yet.
+- Terrain visuals are flat coloured primitives, not art — intentional placeholder, deferred to the polish pass.
+- **AR plane detection is this project's proven weak point** and has failed on real surfaces more than once. See `plan.md` Section 9 for mitigations and the escape hatch.
+- **RevenueCat purchases don't complete on a real device yet** — the product only exists on the Test Store; real builds go through Google Play Billing, which needs a Play Console product. Code and dashboard are otherwise done.
 
 ## Tech stack
 
-- **Engine:** Unity 6 (URP), AR Foundation + Google ARCore XR Plugin
-- **Pathing:** Unity AI Navigation (NavMeshSurface/NavMeshAgent/NavMeshObstacle), baked at runtime once Fortify ends
-- **Platform:** Android-first (no depth sensor required — manual box-tagging works on any ARCore-capable phone); iOS planned later via cloud macOS CI
-- **Zero AI/ML** anywhere in the stack — terrain classification is pure computational geometry (bounding box, height, aspect ratio), by explicit design constraint
+- **Engine:** Unity 6000.5.6f1 (URP), AR Foundation 6.5 + Google ARCore XR Plugin
+- **Pathing:** Unity AI Navigation (NavMeshSurface/Agent/Obstacle), baked at runtime once the board is placed
+- **Platform:** Android-first (no depth sensor required); iOS planned later via cloud macOS CI
+- **Zero AI/ML** anywhere in the stack. The AI commander is rule-based game AI — explicit thresholds and utility scoring, no learned model — which is a deliberate design constraint, not a shortcut.
 
 ## Project structure
 
 ```
-Assets/Scripts/                    - ScrapSiege.Runtime.asmdef (named assembly, referenced by Tests)
-  AR/       - Scan phase: PlaneLockController (lock/rescan, one-plane rule), PlaneOutlineVisualizer,
-              CloudAnchorManager stub
-  Terrain/  - Fortify phase: classification, spawning, corner-tap input handling, NavMeshAreas
-  Siege/    - Siege phase: phase handoff, resource economy, unit deployment/pathing, win condition,
+Assets/Scripts/                 - ScrapSiege.Runtime.asmdef (named assembly, referenced by Tests)
+  AR/       - PlaneLockController (scan, lock/rescan, one-plane rule, scan diagnostics),
+              PlaneOutlineVisualizer, CloudAnchorManager stub
+  Terrain/  - TerrainObjectSpawner ("Cartoonify" placeholder visuals + NavMesh carving +
+              CoverLane tagging), TerrainArchetype, TerrainObjectData, NavMeshAreas,
+              TerrainClassifier + FortifyInputController (scanning - slated for replacement
+              by authored-map placement, see plan.md Section 8 Week A)
+  Siege/    - phase handoff, resource economy, unit deployment/pathing, win condition,
               Muster/garrison, BaseHealth
   UI/       - HudController (the one place that decides what the HUD shows), UITheme palette,
               SafeAreaFitter, UIButtonMotion
   Monetization/ - ProEntitlement.cs only: the decoupled Pro-status gate gameplay code reads
-Assets/Monetization/                - deliberately OUTSIDE ScrapSiege.Runtime.asmdef - see plan.md
-                                       Section 6 for why. MonetizationManager.cs, PaywallController.cs
-Assets/UI/Generated/                - procedurally generated 9-sliced rounded-rect + circle sprites,
-                                       tinted per use from UITheme (no external UI art dependency)
-Assets/Tests/EditMode/              - automated tests for TerrainClassifier (Window > Test Runner)
-Assets/Prefabs/
-  GroundQuad, DummyBase, SiegeUnit, GarrisonUnit  - runtime-instantiated during Siege
-  PlaneOutline - the ARPlaneManager plane prefab
-Assets/Scenes/
-  ARTest.unity - the one scene the whole current loop runs in
+Assets/Monetization/            - deliberately OUTSIDE ScrapSiege.Runtime.asmdef (the RevenueCat
+                                  SDK ships with no asmdef). MonetizationManager, PaywallController
+Assets/UI/Generated/            - procedurally generated 9-sliced rounded-rect + circle sprites,
+                                  tinted per use from UITheme (no external UI art dependency)
+Assets/Tests/EditMode/          - TerrainClassifier tests (Window > General > Test Runner)
+Assets/Prefabs/                 - GroundQuad, DummyBase, SiegeUnit, GarrisonUnit, PlaneOutline
+Assets/Scenes/ARTest.unity      - the one scene the current loop runs in
 ```
 
 ## Running it
 
-1. Open the project in Unity 6 with Android Build Support installed.
+1. Open in Unity 6 with Android Build Support installed.
 2. Open `Assets/Scenes/ARTest.unity`.
-3. Build & Run to an ARCore-capable Android device (tested on a Samsung Galaxy Tab and an Honor phone with no depth sensor).
-4. Sweep the camera over a table until a blue outline appears and the readout shows a mapped area, then tap **Lock This Table** (**Rescan** later if it grabbed the wrong surface).
-5. Tap two corners of a real object + pick its height, repeat for more objects, tap **Done**.
-6. Pick **Direct** or **Covered**, then tap the table to deploy units at the enemy base.
+3. Build & Run to an ARCore-capable Android device (tested on a Samsung Galaxy A56 and an Honor phone with no depth sensor).
+4. Sweep the camera over a surface until the readout shows a mapped area, then tap **Lock This Table**.
+5. Current build then runs the legacy scan-based flow; the authored-map placement replacing it is the next task (`plan.md` Section 8, Week A).
 
-There's no Editor Play Mode AR simulation configured yet — testing happens on-device.
+There's no Editor Play Mode AR simulation configured — testing happens on-device. When something behaves wrong on the phone, pull logs before theorising:
+
+```
+adb logcat -d -s Unity:V | grep -A8 PlaneLock    # why the Lock button is grey
+adb logcat -d -s Unity:E                          # exceptions
+```
+
+`adb` is bundled with Unity at
+`C:\Program Files\Unity\Hub\Editor\6000.5.6f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe`.
+
+## Branches
+
+- **`main`** — the single-player game (current direction).
+- **`two-player-archive`** — the abandoned two-device LAN build: Netcode for GameObjects over direct LAN, UDP host discovery, two-point shared board alignment, server-authoritative replicated terrain with half-of-table ownership, and a host-authoritative networked siege with per-player bases and resources. Complete as code, never validated end-to-end on hardware.
 
 ## License / submission context
 

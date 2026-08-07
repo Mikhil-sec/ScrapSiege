@@ -1,172 +1,149 @@
-# Scrap Siege — Project Plan
+# Scrap Siege — Design & Build Plan
 
-## 1. Background & Context
+## 1. The Hackathon
 
 This project is being built for **RevenueCat Shipaton 2026**, a hackathon-style competition run by RevenueCat/Devpost.
 
-- **Submission window:** the app's first version must be created/demoed between **August 1 and September 30, 2026**.
-- **Category: Next Gen Award** — a student-only track. This means:
-  - **No paid Apple/Google developer account or store listing is required.**
-  - Submission is via **Devpost**, consisting of:
-    - A text description of the app's features and functionality.
-    - A **demo video**, max **2 minutes of essential footage**, uploaded publicly to YouTube or Vimeo. Must show the app running on the device it was built for. No third-party trademarks or copyrighted music/material without permission.
-    - A link to a **public, open-source code repository**.
-    - A **1024×1024 app icon**.
-    - At least one **screenshot at 1179×2556px, no device frame**.
-    - Either a **free trial** in the app, or a **promo code**, so judges can unlock and test the in-app purchase / premium features.
-  - Judged on the video + open-source code (no store release needed), but Next Gen entries also remain in the broader Shipaton prize pool.
-- **Hard technical requirement (applies to all entrants, including Next Gen):** the app must integrate the **RevenueCat SDK** to power **at least one in-app purchase**.
-- **Personal goals for this project (from the builder):**
-  - Must be **original** — not a re-skin of an existing well-known game or app concept.
-  - Must be genuinely **impressive / "wow" level**, not a minimal-effort submission.
-  - **No AI/ML features inside the app.** This is an explicit, firm constraint — no on-device ML, no generative AI, no "AI-powered" anything as a marketed or functional feature.
-  - Should work across the phone brands actually common where the builder lives (**Mauritius**): **iPhone, Samsung, and Honor** are all significant. Cross-brand compatibility is a real design goal, not a nice-to-have.
-  - The builder has access to **Claude (Pro) as a coding agent** and expects to lean on it heavily for implementation — so ambition/complexity should not be artificially minimized, but risk should still be managed deliberately (see Risks section).
+- **Submission window:** 2026-08-01 to 2026-09-30.
+- **Target category:** **Next Gen Award** (student-only, requires a .edu or equivalent email; judged on video + open-source code, **no store release required**, no paid developer account needed).
+- **Required at submission:**
+  - A **demo video**, max **2 minutes of essential footage**, publicly on YouTube or Vimeo. Must show the app running on the device it was built for. No third-party trademarks or unlicensed music.
+  - A **public open-source repository**.
+  - **Hard technical requirement for all entrants:** the app must integrate the **RevenueCat SDK** powering **at least one in-app purchase**.
+- **Personal goals (from the builder):** must be genuinely impressive, not a minimal-effort submission; must work on the phone brands common in Mauritius (Samsung, Honor, iPhone); ambition should not be artificially minimised, but risk must be managed deliberately.
 
-## 2. How We Got Here (idea evolution, for context)
+## 2. Direction History — and why the current design exists
 
-1. **First direction (rejected by builder):** AI-generated content apps (an ambient-sound-to-generative-art app, then an AI-illustrated autobiographical storybook app). Rejected because the builder wants **zero AI features** in the app — tired of AI being force-fit into everything.
-2. **Second direction (rejected on compatibility grounds):** "Foxhunt" — a real-world radar tag game using UWB (Ultra-Wideband) precision ranging (Apple Nearby Interaction / Android Jetpack UWB). Investigated and found:
-   - UWB hardware is **not** universal: present on all iPhone 11+, only present on **premium/Ultra-tier Samsung** phones, and **absent on current Honor flagships** (including the builder's own phone).
-   - Apple's and Android's UWB stacks are **not interoperable** with each other out of the box.
-   - Even with a tiered fallback (UWB → Bluetooth RSSI proximity), the **real-time, fast-movement nature of a tag game** made reliable cross-platform play risky to build well in the timeframe.
-3. **Current direction (in progress):** Pivoted to a **static, tabletop AR battle game** instead of a fast-movement outdoor game. This removes the real-time proximity/latency problem entirely and uses **AR plane-tracking + shared anchors**, which work across nearly all modern smartphones — a much better fit for "works across iPhone, Samsung, and Honor."
-4. **Originality check:** the initial tabletop AR concept mechanically resembled **Clash Royale** (two-lane, resource-based real-time unit deployment toward an opposing base). The design was reworked around mechanics that are only possible because this is AR on a real physical table (see Section 4) — specifically to avoid being "Clash Royale with an AR skin."
+This section is deliberately kept, because the reasoning behind the pivots is itself part of the project story.
 
-## 3. The Concept: Scrap Siege
+1. **AI-generated content apps** — rejected. The builder wanted zero AI features; tired of AI being force-fit into everything.
+2. **UWB-based outdoor tag game** — rejected. UWB isn't universal (absent on the builder's own Honor), and the real-time fast-movement nature made cross-platform reliability risky.
+3. **Two-player AR tabletop battler with scavenged terrain** — *built, then abandoned 2026-08-07.* Players arranged real objects as terrain and fought across a network-synced board. Weeks 1–2 (terrain scanning, pathing, siege loop) and a full Week 3 LAN implementation all worked as code. **What killed it was AR plane detection**: across floor, cushion table and dining table, the app could not reliably produce a lockable surface, which made the shared-board co-location step too fragile to build a match on. Preserved on the `two-player-archive` branch.
+4. **Current direction — single-player, projected maps.** Hand-designed battlefields projected onto any flat surface, fought against a rule-based AI commander. Removes the two hardest dependencies at once (cross-device co-location, and reliable scanning of arbitrary real objects) while keeping the AR-native identity.
 
-**One-line pitch:** An augmented-reality tabletop battle game where two players — on any two phones, any brands — build their battlefield out of whatever's actually sitting on the table, then fight a real-time skirmish across it. The terrain is different every single match because it's made from real objects, not a designed map.
+## 3. The Concept
 
-**Why this is the right project:**
-- **Genuinely original mechanic**, not just an AR reskin of an existing game genre (see Section 4 for exactly how it differs from Clash Royale, which is the closest comparison).
-- **No AI anywhere in the stack** — pure AR (plane detection, shared spatial anchors), real-time networking, and game logic.
-- **Cross-platform by construction:** built once in Unity + AR Foundation, targets Android first (with iOS as a later addition — see Section 8) from one codebase, and uses Google's ARCore Cloud Anchors (confirmed still active and cross-platform as of 2026) to sync two devices to the *same* physical anchor point — meaning a Honor player and a Samsung player (assuming both support ARCore — most modern Honor/Samsung devices with Google Play Services do) can play on the same real table together. iOS support (an iPhone joining the same match) remains part of the long-term cross-platform pitch and can be added once a build path is available, but is not required for the core Android-to-Android build.
-- **Demo-friendly:** small, tabletop scale means it can be filmed and playtested anywhere (a kitchen table), with no need for large physical spaces or special lighting rigs — unlike a full-court-scale AR idea, which was considered and rejected for exactly this reason.
+**One-line pitch:** A tabletop war game that only exists on *your* table — project a battlefield onto any real surface, then out-think an AI commander by physically moving around the board, leaning in to place troops precisely and pulling back to read the whole fight.
 
-## 4. Core Mechanics — What Makes This Not Clash Royale
+**Why this is worth building:**
+- **The AR is load-bearing, not decorative.** Your physical vantage point changes what you can do and what you can see (Section 4). Take away the camera and the game stops working — which is exactly the bar an AR entry should clear.
+- **Robust by construction.** It needs one flat surface and nothing else. No second device, no cloud anchor, no scanning of arbitrary objects, no internet. Every failure mode that killed the previous direction is gone.
+- **Demo-friendly.** Tabletop scale, filmable anywhere, and a match can be shown start-to-finish inside a 2-minute video.
 
-The starting point resembled Clash Royale's skeleton (two lanes, resource-gated unit deployment, real-time push toward an opposing base). The following mechanics are built specifically around what's only possible because this is AR on a real physical surface, to make the identity genuinely different:
+## 4. Core Mechanics — what makes this not a flat-screen game
 
-### Mechanic 1 — Scavenged Terrain (highest priority, must-have)
-Before a match, each player has ~60–90 seconds to physically arrange real objects on their side of the table (a mug becomes a watchtower, a book becomes a wall, a phone stand becomes a bridge). The app scans the final arrangement and procedurally derives chokepoints, walls, and cover from the real object geometry. No two matches are ever on the same layout, because no two tables have the same objects on them.
+The previous design's originality rested on scavenged terrain. With authored maps, the identity now rests on the two mechanics below. **These are the priority; protect them.**
 
-#### Terrain Generation — How It Actually Works (technical detail)
+### Mechanic 1 — Vantage (must-have, the headline)
 
-The app never tries to recognize *what* a real object is (that would require object-recognition ML, which is explicitly out of scope — see "No AI, by design" below). Instead it measures each object's **shape**, buckets it into one of a handful of deterministic gameplay archetypes using geometric rules, and skins that archetype with a pre-made cartoon asset scaled to cover it. Troops don't path around the unmodified real object — they path around the cartoon archetype placed on top of it.
+The phone's real position relative to the board is a continuously-read gameplay input. There is no UI toggle — your body is the control.
 
-**Two-tier detection (mirrors the hardware-tiering approach used elsewhere in this project):**
-- **Tier A — Depth-capable devices** (iPhone 12 Pro+, higher-end Android phones with a depth sensor): fully automatic. During Fortify, the app scans the scene mesh, clusters connected "bumps" above the table plane (basic computational geometry, not a learned model), and extracts each object's bounding box — height, footprint area, footprint aspect ratio (round vs. elongated), and position.
-- **Tier B — No depth sensor** (most mid-range Android, including the builder's own Honor): guided manual tagging. During Fortify, the player drags a box or taps two corners around each real object on the live camera view. Plane hit-testing (works on virtually any AR-capable phone, no depth needed) gives real-world footprint coordinates. Height isn't measurable this way, so the player picks a size category (short / medium / tall) with one tap. Slightly more manual, but keeps the game playable on the phones actually common in Mauritius.
+| Posture | Placement precision | Field of view | Trade-off |
+|---|---|---|---|
+| **Leaned in** (low, close) | Tight — deploy lands where you tap | Narrow; can't see the far side | Precise but blind to flanks |
+| **Pulled back** (high, distant) | Loose — deploy scatters within a radius | Whole board readable | Aware but imprecise |
 
-Both tiers produce the same output — a set of objects, each with a footprint and a height — and everything downstream is identical regardless of which tier produced it.
+Implementation: read camera height above the board plane each frame, map it to a deploy-scatter radius and (optionally) a subtle vignette/uncertainty overlay. Continuous, not stepped, so leaning is a fluid act rather than a mode switch.
 
-**Geometric classification (rule-based thresholds, no ML):**
+### Mechanic 2 — True line of sight (must-have)
 
-| Measured shape | Archetype | Gameplay effect |
-|---|---|---|
-| Short, wide, low | Rubble / Cover | Partial cover — units can crouch behind it, partial line-of-sight block |
-| Tall, narrow footprint | Spire / Chokepoint | Full line-of-sight block, forces units to path around |
-| Long, thin, elongated footprint | Wall / Barricade | Acts as a lane divider depending on orientation |
-| Medium, roughly round, no strong feature | Plain Obstacle | Units just path around it — no strategic bonus, pure terrain |
-| Tallest object on the board | Watchtower (bonus tier) | Same as Spire, plus a small vision/defensive bonus for the base nearest it |
+Enemy units are only revealed when there is a clear line from the **actual camera position** to them, blocked by Wall/Spire/Watchtower terrain. Unseen enemies leave a fading "last known position" marker.
 
-A mug becomes a Spire. A paperback lying flat becomes a Wall. A phone stand becomes a Watchtower if it's the tallest thing on the table that match. Same shape always maps to the same bucket — deterministic, tuned via playtesting thresholds, no training or inference involved.
+This means peeking round a virtual wall is done by *physically leaning*, and a spire genuinely hides what's behind it from where you're standing. Implementation is a per-unit raycast from the AR camera against terrain colliders — cheap, deterministic, no ML.
 
-**"Cartoonify" step:** rather than masking/erasing the real object from the camera feed (an extra rendering system that isn't needed), the app simply places an opaque, pre-made cartoon asset for the matched archetype at the object's real position, scaled to be at least as large as the measured bounding box (generous margin so the real object never peeks out from odd angles). Because AR content renders on top of camera passthrough, a same-or-larger opaque virtual object at the same spot reads visually as "the mug is now a tower" with no occlusion trickery required.
+### Mechanic 3 — Route variety (already built, keep)
 
-**No AI, by design:** this system was deliberately kept fully rule-based rather than adding real object recognition (e.g. on-device Vision/ML Kit labeling to know "this is specifically a mug"). Reasons: (1) it's more demo-reliable — a misclassified object live on camera is a worse failure mode than a purely geometric system that never behaves unpredictably; (2) it doesn't actually serve the core joke ("my junk became a battlefield" already lands with a generic cartoon skin — a correct label adds little); (3) it keeps the project consistent with the "zero AI" constraint that's part of this project's identity, not just a technical afterthought. If more charm is wanted later, the plan is to let the *player* name their own objects during Fortify (a one-tap text field) rather than have the app guess — zero engineering risk, zero cost, arguably funnier than a correct label.
+Two deploy modes with a real risk/speed trade-off:
+- **Direct** — the CoverLane NavMesh area is excluded from the agent's areaMask, so units take the shortest open route.
+- **Covered** — default areaMask, so NavMesh's own cost-based pathing detours through the cheap CoverLane polygons laid down beside Rubble/Wall terrain.
 
-### Mechanic 2 — Camera Height / Posture Trade-off (must-have, cheap to build)
-Each player's phone occupies a real position and height relative to the shared virtual board:
-- **Leaning in close** → precise unit placement, but a narrow field of view (can't see the whole board, can't react to the far side).
-- **Pulling back / standing** → wide commander's view of the whole battlefield, but coarser placement, and visibly telegraphs that you're not focused on one spot.
-This is a real tactical trade-off that cannot exist in a flat-screen game where both players see an identical top-down view.
+`GarrisonSentry` is what makes the choice matter: it only damages units **not** standing in a CoverLane area. This system works today and needs no redesign — authored maps simply place the cover that drives it.
 
-### Mechanic 3 — Explore-to-Earn Resources (stretch goal)
-Instead of a passive mana bar that fills over time (Clash Royale's model), resources are generated by physically scanning more of the environment — extending the usable battlefield and revealing new terrain features — rewarding physical engagement over passive waiting. **Fallback if time is tight:** a simple timer-based resource tick, kept as a safe default so the core loop is never blocked on this system.
+### Mechanic 4 — Flank by walking (nice-to-have)
 
-### Match structure
-1. **Scan** — sweep the phone over the table until enough surface is mapped, then explicitly **lock one plane** as the board. Locking freezes ARCore plane detection and hides every other detected plane; **Rescan** reverses it. *(Added after playtesting: letting Fortify start against a plane that ARCore was still growing meant the board could stretch or shift under already-placed terrain. Committing to exactly one surface, at a moment the player chooses, removes that whole class of drift — and gives an honest recovery path when ARCore latches onto the floor instead of the table.)*
-2. **Fortify** (60–90s) — physically arrange objects; app scans terrain. Corner taps are constrained to the locked plane.
-3. **Muster** — starting garrison auto-populates based on the chokepoints created.
-4. **Siege** — real-time phase; resource-based deployment shaped by the scavenged terrain and the camera-height trade-off.
-5. **Aftermath** — short cinematic zoom on the decisive push when a base falls (good demo-video beat). Currently a victory card with a Play Again reset, no cinematic yet.
+Garrison sentries cover a facing arc rather than a full circle. Physically walking to another side of the table lets you deploy into a weaker arc. Cheap to add on top of Mechanic 2 and it rewards the same physical behaviour.
 
-### Explicitly deferred / not committed
-- **Gesture-based unit summoning** (drawing a shape in the air to summon a unit, instead of tapping) — flagged as a strong "wow" candidate for the demo video, but carries real engineering risk if it needs to work reliably without leaning on ML. Treat as a **week 1 spike**: prototype it early, alongside the Cloud Anchor test, and only commit to it if it feels solid fast. Do not block the core game loop on this.
+### Terrain archetypes (retained from the previous design)
 
-## 5. Tech Stack
+Authored maps are built from the same five archetypes, so all the downstream systems — spawner, NavMesh obstacle carving, CoverLane tagging, garrison placement — carry over unchanged:
 
-- **Engine:** Unity, using **AR Foundation** (Unity/Google's cross-platform layer over ARKit and ARCore) — one C# codebase targets both iOS and Android, avoiding a native Swift + native Kotlin split.
-- **Shared spatial anchors:** **ARCore Extensions for AR Foundation** → Cloud Anchors, for cross-platform (Android + iOS) shared-anchor syncing between two devices on the same table.
-- **Multiplayer state sync:** lightweight realtime layer (e.g. Firebase Realtime Database, or a small Unity Netcode relay) updating a few times per second — the game does *not* need continuous high-frequency ranging like the earlier tag-game concept did, which significantly de-risks this compared to that direction.
-- **Monetization:** **RevenueCat Unity SDK**, wired to at least one in-app purchase (subscription and/or one-time cosmetic packs — see Section 6).
-- **Platform targets:** iOS and Android (Android build also covers Samsung Galaxy Store distribution if pursued later, though **not required** for the Next Gen category).
+| Archetype | Gameplay role |
+|---|---|
+| Wall / Barricade | Hard block, blocks line of sight |
+| Spire / Chokepoint | Hard block, tall, blocks line of sight, garrison anchor |
+| Rubble / Cover | Passable, lays a CoverLane, blocks nothing visually |
+| Plain Obstacle | Hard block, low |
+| Watchtower | Bonus tier — garrison anchor with a wider sentry arc |
 
-## 6. Monetization Design (RevenueCat)
+**No AI, by design:** classification is gone (maps are authored), but the constraint still holds across the whole app. The AI commander in Section 5 is rule-based game AI, not machine learning.
 
-- **Free tier:** base game, one map/terrain theme, core tower/unit set, single-player + local competitive mode.
-- **Scrap Siege Pro (subscription, with a free trial so judges can test premium features per submission requirements):**
-  - Additional unit/tower types
-  - Cosmetic terrain/map themes (reskins of the same core battlefield — e.g. medieval, sci-fi, pirate)
-  - Endless/extra game modes
-  - Extra visual effects packs
+## 5. The AI Commander
 
-This is designed as genuine value-tier gating (more content, not functionality lockout), matching what RevenueCat's judging criteria tend to reward.
+A rule-based opponent — explicit thresholds and utility scoring, no learned model, fully debuggable.
 
-### Implementation status (as of 2026-08-04)
+- **Symmetric economy.** The AI ticks resources on the same schedule as the player, so difficulty comes from decision quality and tuning rather than cheating.
+- **Behaviour loop** (evaluated on a slow tick, ~1s): score each candidate action — reinforce a threatened lane, push the player's weakest-defended approach, hold resources for a bigger wave — and take the best.
+- **Difficulty tiers:** resource rate, reaction delay, willingness to commit, unit mix. Tune per level.
+- **Readability matters.** The player should be able to *see* the AI reacting; telegraphing a push is better than optimal play. This is a demo-video game as much as a strategy game.
 
-Dashboard and code are both built; on-device purchases are blocked only on a real Google Play Console product (see below), not on any remaining engineering work.
+## 6. Levels
 
-- **RevenueCat project:** "ScrapSiege" (`proj3a523262`). Entitlement `pro` gates the one shipped Pro feature so far: a second, more saturated terrain color palette (`TerrainObjectSpawner.ProColorForArchetype`) — a real cosmetic reskin, not a functionality lock, per the design above.
-- **Two RevenueCat apps exist:**
-  - **Test Store** (`appda5538b8e2`) — has a real product (`scrap_siege_pro_monthly`, $2.99/mo), attached to `pro`, in the `default` offering's `$rc_monthly` package. Works correctly in **Unity Editor Play Mode** (mock wrapper), but a real Android device build always goes through actual Google Play Billing regardless of which RevenueCat app the API key belongs to — Test Store products don't resolve there. Confirmed via on-device logcat: `ConfigurationError - None of the products registered in the RevenueCat dashboard could be fetched from the Play Store.`
-  - **Play Store** (`appa37d9670f8`, package `com.mikhilnaika.scrapsiege`) — app entry created, **no product yet**. Blocked on a Google Play Console developer account (user is getting this separately - not required for Next Gen's store-listing-free submission, purely needed to make Play Billing recognize a real product on-device).
-- **Naming convention reserved for the real product:** create it in Play Console as a subscription with product ID `scrap_siege_pro` and base plan ID `monthly`, so the RevenueCat store identifier comes out to `scrap_siege_pro:monthly` — this lets it be registered and attached to the existing `pro` entitlement/`$rc_monthly` package without renaming anything already built.
-- **Unity-side code:** `Assets/Monetization/MonetizationManager.cs` (SDK config/offerings/purchase/restore) and `PaywallController.cs` (paywall UI logic), kept deliberately outside `Assets/Scripts/ScrapSiege.Runtime.asmdef` since the RevenueCat SDK ships with no `.asmdef` of its own. `Assets/Scripts/Monetization/ProEntitlement.cs` is the one-way decoupled gate gameplay code reads instead of touching the SDK directly.
+Hand-authored, stored as ScriptableObjects (`LevelDefinition`), so adding content needs no code:
 
-## 7. Timeline (6 weeks, risk-ordered)
+- Terrain placements in **normalised board space** (board is 1.0 long × ~0.6 wide, scaled at runtime to whatever surface the player has). Each entry: archetype, position, rotation, size.
+- Both base positions, starting resources, AI difficulty params, and star thresholds (time / units lost / base HP remaining).
+- Ship ~6–8 free campaign levels plus Pro packs (Section 7).
 
-Front-loaded so the highest-risk, most novel technical piece (cross-device Cloud Anchors) is validated in week 1, not discovered as broken in week 4.
+**Placement flow:** find and lock a flat surface → tap to drop the board → drag to reposition, two-finger twist to rotate, pinch to scale → confirm. `BoardFrameVisualizer` (already written) shows the footprint before committing.
 
-- **Week 1:** Unity + AR Foundation project setup, basic plane detection working. **Cloud Anchor cross-device spike** — get two Android devices (different brands if possible, e.g. Honor + a second Android phone) sharing a single anchor point successfully. iOS cross-platform testing is deferred (see Section 8 note) — Android-to-Android is the priority to validate first. Optional: quick spike on gesture-based summoning to decide go/no-go.
-- **Week 2 (done 2026-08-03):** Single-player core loop — terrain scanning (Mechanic 1), unit placement, wave/resource economy, basic pathing, plus win condition, Muster/auto-garrison, and route-variety pathing.
-- **Week 3 (not started):** Two-device competitive sync — broadcasting game state between the two anchored sessions; camera-height mechanic (Mechanic 2) implemented. Blocked on having a second Android device.
-- **Week 4 (in progress, started 2026-08-04 ahead of Week 3 since it didn't need a second device):** RevenueCat integration — dashboard, entitlement, offering, paywall UI, and the Pro cosmetic palette are all built and working (in Editor Play Mode / Test Store). Real on-device purchases are blocked only on a Google Play Console product - see Section 6.
-- **Week 5:** Polish — VFX, sound design, terrain-scan robustness/occlusion handling, difficulty balancing, UI/UX pass. **The UI/UX pass was pulled forward to 2026-08-07** (it didn't need a second device either): the HUD was rebuilt from a flat pile of default Unity buttons at hardcoded 800×600 pixel offsets into a phase-driven, safe-area-aware, single-palette interface, and the Scan phase above was added at the same time. Still outstanding for Week 5: VFX, sound, terrain art ("Cartoonify"), difficulty balancing.
-- **Week 6 (buffer):** Real playtests with two physically different phone brands, demo video shoot + edit, repo cleanup for public visibility, icon + screenshots + submission assets.
+## 7. Monetization (RevenueCat)
 
-## 8. Known Risks & Mitigations
+**Already built and working** — do not break it. Full details:
 
-- **Cloud Anchor reliability on low-texture surfaces** (e.g. a plain white table can be hard to lock onto). Mitigation: design a simple printable "battle mat" (a PDF/SVG placemat with a grid/pattern) that also serves as a nice thematic prop for the demo video.
-- **Cross-brand Android AR support varies.** ARCore requires Google Play Services; most modern Honor and Samsung devices sold outside China have this, but the specific test devices should be checked against Google's ARCore supported-devices list before relying on them for the demo.
-- **Gesture-based summoning (stretch) could eat time without a clean non-ML solution.** Keep it strictly time-boxed to a week 1 spike; fall back to tap-to-place if it's not solid quickly.
-- **Explore-to-earn resource system (stretch) adds complexity to the core loop.** Keep the simple timer-based resource tick as the default, and only layer in the fancier version if weeks 1–4 go smoothly.
-- **Two-device testing logistics.** This project cannot be fully tested solo on one device — plan early to have consistent access to a second phone (ideally a different brand) throughout the build, not just at the end.
-- **iOS deferred, Android-first.** No Mac is available for local Xcode builds. Development and all core testing target **Android-to-Android Cloud Anchor sync** first (e.g. Honor + a second Android phone), which is fully achievable without a Mac. An iOS build remains possible later via a cloud macOS CI service (e.g. Codemagic) for the cross-platform demo, but it is not a blocker for weeks 1–5 and should not be assumed available during core development.
+- **Project:** "ScrapSiege" (`proj3a523262`). Entitlement `pro`.
+- **Test Store** (`appda5538b8e2`) — product `scrap_siege_pro_monthly` ($2.99/mo), attached to `pro`, in the `default` offering's `$rc_monthly` package. Works in Unity Editor Play Mode (mock wrapper). A real Android build always goes through actual Google Play Billing regardless of which RevenueCat app the key belongs to, so Test Store products don't resolve on-device.
+- **Play Store** (`appa37d9670f8`, package `com.mikhilnaika.scrapsiege`) — app entry created, **no product yet**, blocked on a Google Play Console account. Reserved naming: product ID `scrap_siege_pro`, base plan `monthly`, giving store identifier `scrap_siege_pro:monthly`.
+- **Unity code:** `Assets/Monetization/` (`MonetizationManager`, `PaywallController`) sits deliberately **outside** `ScrapSiege.Runtime.asmdef` because the RevenueCat SDK ships with no asmdef. `Assets/Scripts/Monetization/ProEntitlement.cs` is the decoupled gate gameplay reads instead of touching the SDK.
 
-## 9. Award Judging Criteria (both target categories - keep in view throughout, not just at submission time)
+**What Pro unlocks (revised for the new direction):**
+- **Level packs** — the natural fit now that content is authored, and a much better IAP story than before.
+- Cosmetic board themes and the saturated terrain palette (`TerrainObjectSpawner.ProColorForArchetype`, already shipped).
+- Extra visual effect packs.
 
-Confirmed as of 2026-08-03. **Next Gen (student lane) is the prime target**; Best Game is a secondary target with the same submission. Every feature/polish decision from here on should be weighed against both rubrics below, not just against plan.md's own design goals.
+Still genuine value-tier gating — more content, not a functionality lockout.
 
-### Next Gen Award (student-only, requires .edu or equivalent email; judged on video + open-source code, no store release required)
-- Is the app idea clear, useful, interesting, or original? Does it solve a real problem or create a compelling experience for its intended users?
-- Does the submitted project demonstrate meaningful progress toward a working app? Is the core functionality clear from the video and code repository?
-- Does the project thoughtfully use RevenueCat to support subscriptions, in-app purchases, web purchases, ads, or another monetization flow?
-- Does the submission show thoughtful technical choices, product thinking, and care in how the app was built and presented?
+## 8. Timeline (~7.5 weeks remaining, submission 2026-09-30)
 
-### Best Game Award (open category, best mobile game shipped during the event)
-- Is the game fun and engaging to play?
-- Does it provide a unique gameplay experience, progression, or replayability?
-- How is the game monetized?
+Ordered so the new-direction risk is retired first and the demo video is never the thing that slips.
 
-## 10. Next Gen Submission Checklist (for later, keep in view throughout)
+- **Week A (Aug 8–14) — Make the new loop exist.** `LevelDefinition` ScriptableObject + board placement flow (tap/drag/rotate/scale/confirm) replacing the Fortify phase. Spawn an authored map and get the existing Siege loop running on it end-to-end. Two throwaway test levels.
+- **Week B (Aug 15–21) — Make it a game.** Player base + real **Lose** condition (missing since Week 2 of the old build). AI commander v1. Win/lose flow, level select screen.
+- **Week C (Aug 22–28) — Make it AR.** Mechanic 1 (vantage) and Mechanic 2 (line of sight). These are the originality argument; do not let them slip.
+- **Week D (Aug 29–Sep 4) — Content.** 6–8 authored levels, star ratings, difficulty tuning, Mechanic 4 if time allows.
+- **Week E (Sep 5–11) — Monetization + store.** Gate Pro level packs behind the existing entitlement. Google Play Console product, Internal Testing track, real on-device purchase verified.
+- **Week F (Sep 12–18) — Polish.** Terrain art ("Cartoonify"), VFX, sound, HUD pass.
+- **Week G (Sep 19–30) — Ship.** Demo video, icon, screenshots, `PROJECT_STORY.md`, repo cleanup, buffer.
 
+## 9. Known Risks & Mitigations
+
+- **AR plane detection is the project's proven weak point.** It has failed repeatedly on real surfaces. Mitigations: accept a *small* seed plane rather than demanding a large validated one (threshold now 0.02 m²); fall back to estimated planes and feature points for raycasts; scan diagnostics are logged every 2s (`adb logcat -d -s Unity:V | grep PlaneLock`) so failures are explainable rather than mysterious. **If it still proves unreliable, the escape hatch is to let the player place the board at a fixed distance in front of the camera with no plane at all** — worse UX, but it cannot fail.
+- **Losing scavenged terrain weakens the originality pitch.** Mitigated by making vantage + line-of-sight the headline mechanics (Section 4) and saying so explicitly in the demo video and `PROJECT_STORY.md`. Judges should see AR doing something a flat screen cannot, within the first 30 seconds.
+- **Authored content is a time sink.** 6–8 good levels is the target, not 20. Build the level format early (Week A) so authoring is cheap later.
+- **Google Play Console product still blocks real on-device purchases.** Not required for Next Gen submission, but needed for a fully honest monetization demo.
+- **Cross-brand ARCore support varies.** Verify test devices against Google's ARCore supported-devices list before relying on them for the demo.
+- **iOS deferred.** No Mac; Android-to-completion is the priority. Possible later via cloud macOS CI, not a blocker.
+
+## 10. Judging Criteria — Next Gen Award
+
+- Does the submission show a genuinely new or unexpected use of the platform? → **Mechanics 1 and 2 are the answer.** Lead with them.
+- Does it show thoughtful technical choices, product thinking, and care in how it was built and presented? → the pivot reasoning in Section 2 is an asset here, not an embarrassment: it shows risk being measured and acted on.
+- Does it integrate RevenueCat meaningfully? → level packs behind a real entitlement, already wired.
+
+**Secondary targets:** RevenueCat **Design Award** (rides on the Week F polish pass and the already-rebuilt HUD) and the **HAMM Award** (rides on the monetization work being done thoughtfully rather than bolted on).
+
+### Submission checklist
 - [ ] App built and demoed (no store listing required for Next Gen)
-- [ ] RevenueCat SDK integrated, powering at least one in-app purchase
-- [ ] Free trial or promo code available so judges can unlock premium features
-- [ ] Public, open-source code repository
-- [ ] Demo video (≤2 minutes of essential footage), publicly on YouTube or Vimeo, no unlicensed third-party trademarks/music
-- [ ] 1024×1024 app icon
-- [ ] At least one screenshot at 1179×2556px, no device frame
-- [ ] Text description of features and functionality for the Devpost submission
+- [ ] RevenueCat SDK powering at least one IAP
+- [ ] Public open-source repo, reasonably clean
+- [ ] Demo video ≤2 min, public, no unlicensed material
+- [ ] `PROJECT_STORY.md` written up for the Devpost story field
