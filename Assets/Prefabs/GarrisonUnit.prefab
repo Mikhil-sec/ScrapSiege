@@ -13,6 +13,8 @@ GameObject:
   - component: {fileID: 4780994558400087103}
   - component: {fileID: 2955272073397023709}
   - component: {fileID: 839958760192880124}
+  - component: {fileID: 4842485151751418025}
+  - component: {fileID: 3235784017818378335}
   m_Layer: 0
   m_Name: GarrisonUnit
   m_TagString: Untagged
@@ -126,6 +128,39 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ScrapSiege.Siege.GarrisonSentry
   detectionRadius: 0.2
+  facingArcDegrees: 150
   tickInterval: 0.5
   damagePerTick: 1
   navMeshSampleDistance: 0.1
+--- !u!114 &4842485151751418025
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1385196293441755479}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 302f167154ce0ce4b94fc7d062a9db36, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Vision.VisionTarget
+  deriveSamplesFromBounds: 1
+  sampleHeight: 0.05
+  edgeInset: 0.15
+--- !u!114 &3235784017818378335
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1385196293441755479}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 635f013429c8b454ab7016821ef4054e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Siege.SentryArcVisualizer
+  arcBaseMaterial: {fileID: 2100000, guid: 78a9eec088419af42bc4b33b55c9ef66, type: 2}
+  arcColor: {r: 0.9, g: 0.25, b: 0.2, a: 1}
+  arcAlpha: 0.18
+  surfaceOffset: 0.002
+  segments: 24

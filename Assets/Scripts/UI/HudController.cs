@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using ScrapSiege.AR;
 using ScrapSiege.Siege;
 using ScrapSiege.Terrain;
+using ScrapSiege.Vantage;
 
 namespace ScrapSiege.UI
 {
@@ -33,6 +34,8 @@ namespace ScrapSiege.UI
         [SerializeField] private SiegePhaseController siege;
         [SerializeField] private SiegeOutcomeController outcome;
         [SerializeField] private UnitDeploymentController deployment;
+        [SerializeField] private VantageController vantage;
+        [SerializeField] private RallyController rally;
 
         [Header("Top bar")]
         [SerializeField] private TMP_Text phaseLabel;
@@ -58,6 +61,16 @@ namespace ScrapSiege.UI
         [Header("Siege phase")]
         [SerializeField] private Image directFill;
         [SerializeField] private Image coveredFill;
+
+        [Header("Vantage (Mechanic 1)")]
+        [Tooltip("Filled bar, 0 = leaned in / precise, 1 = pulled back / overview.")]
+        [SerializeField] private Image vantageFill;
+        [SerializeField] private TMP_Text vantageLabel;
+
+        [Header("Rally (high-vantage order)")]
+        [SerializeField] private Button rallyButton;
+        [SerializeField] private Image rallyFill;
+        [SerializeField] private TMP_Text rallyLabel;
 
         [Header("Outcome")]
         [SerializeField] private GameObject winPanel;
@@ -98,6 +111,18 @@ namespace ScrapSiege.UI
 
             if (siege != null) siege.OnSiegeStarted.AddListener(HandleSiegeStarted);
             if (outcome != null) outcome.OnPlayerWon.AddListener(HandlePlayerWon);
+
+            if (vantage != null)
+            {
+                vantage.OnVantageChanged.AddListener(HandleVantageChanged);
+                vantage.OnRallyAvailabilityChanged.AddListener(HandleRallyAvailabilityChanged);
+            }
+
+            if (rally != null)
+            {
+                rally.OnArmedChanged.AddListener(HandleRallyArmedChanged);
+                rally.OnRallyIssued.AddListener(HandleRallyIssued);
+            }
         }
 
         private void OnDisable()
@@ -121,6 +146,18 @@ namespace ScrapSiege.UI
 
             if (siege != null) siege.OnSiegeStarted.RemoveListener(HandleSiegeStarted);
             if (outcome != null) outcome.OnPlayerWon.RemoveListener(HandlePlayerWon);
+
+            if (vantage != null)
+            {
+                vantage.OnVantageChanged.RemoveListener(HandleVantageChanged);
+                vantage.OnRallyAvailabilityChanged.RemoveListener(HandleRallyAvailabilityChanged);
+            }
+
+            if (rally != null)
+            {
+                rally.OnArmedChanged.RemoveListener(HandleRallyArmedChanged);
+                rally.OnRallyIssued.RemoveListener(HandleRallyIssued);
+            }
         }
 
         private void Start()
@@ -133,6 +170,13 @@ namespace ScrapSiege.UI
             HandleScanStarted();
             SetSegmentSelected(direct: true);
             HandleObjectCount(0);
+
+            // Same reason as HandleScanStarted above: these controllers only raise their events on
+            // *change*, so a HUD that subscribes late would show a stale default until the player
+            // happened to move. Drive the opening state explicitly instead.
+            HandleVantageChanged(vantage != null ? vantage.Vantage01 : 0f);
+            HandleRallyAvailabilityChanged(vantage != null && vantage.IsRallyReady);
+
             SnapPanelAlphas();
         }
 
@@ -250,6 +294,63 @@ namespace ScrapSiege.UI
         {
             if (directFill != null) directFill.color = direct ? UITheme.Steel : UITheme.SurfaceRaised;
             if (coveredFill != null) coveredFill.color = direct ? UITheme.SurfaceRaised : UITheme.Steel;
+        }
+
+        // --- Vantage & Rally ----------------------------------------------------------------
+
+        /// <summary>
+        /// The vantage readout is intentionally a posture *description*, not a number. The player
+        /// should learn "lean in to place precisely" from their own body, not by watching a value.
+        /// </summary>
+        private void HandleVantageChanged(float vantage01)
+        {
+            if (vantageFill != null)
+            {
+                vantageFill.fillAmount = vantage01;
+                vantageFill.color = Color.Lerp(UITheme.Success, UITheme.Accent, vantage01);
+            }
+
+            if (vantageLabel == null) return;
+
+            if (vantage01 < 0.3f) vantageLabel.text = "LEANED IN · precise";
+            else if (vantage01 < 0.6f) vantageLabel.text = "MID · steady";
+            else vantageLabel.text = "PULLED BACK · overview";
+        }
+
+        private void HandleRallyAvailabilityChanged(bool available)
+        {
+            if (rallyButton != null) rallyButton.interactable = available;
+            if (rallyFill != null) rallyFill.color = available ? UITheme.Steel : UITheme.SurfaceRaised;
+            if (rallyLabel != null) rallyLabel.color = available ? UITheme.TextPrimary : UITheme.TextMuted;
+
+            if (phase == Phase.Siege && available)
+                SetPrompt("Rally ready — tap Rally, then a lane.");
+        }
+
+        private void HandleRallyArmedChanged(bool armed)
+        {
+            if (rallyFill != null && rallyButton != null && rallyButton.interactable)
+                rallyFill.color = armed ? UITheme.Accent : UITheme.Steel;
+
+            if (phase == Phase.Siege)
+                SetPrompt(armed
+                    ? "Tap a lane to redirect every unit."
+                    : "Tap the table to deploy. Break the enemy base.");
+        }
+
+        private void HandleRallyIssued(int unitsRedirected)
+        {
+            if (phase != Phase.Siege) return;
+
+            SetPrompt(unitsRedirected == 1
+                ? "1 unit redirected."
+                : $"{unitsRedirected} units redirected.");
+        }
+
+        /// <summary>Wire to the Rally button.</summary>
+        public void ToggleRally()
+        {
+            if (rally != null) rally.ToggleArmed();
         }
 
         // --- Outcome ----------------------------------------------------------------------

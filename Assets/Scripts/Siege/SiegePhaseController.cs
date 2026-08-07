@@ -27,6 +27,13 @@ namespace ScrapSiege.Siege
         [SerializeField] private MusterPhaseController musterPhase;
         [SerializeField] private SiegeOutcomeController outcomeController;
 
+        [Header("AR mechanics (plan.md Section 4)")]
+        [Tooltip("Publishes the board surface height that the vantage mechanic measures against.")]
+        [SerializeField] private ScrapSiege.Core.BoardPlane boardPlane;
+
+        [Tooltip("Optional - the high-vantage Rally order. Enabled alongside deployment when Siege starts.")]
+        [SerializeField] private RallyController rallyController;
+
         [SerializeField] private float dummyBaseDistance = 2f;
         [SerializeField] private float groundQuadSize = 4f;
 
@@ -73,6 +80,14 @@ namespace ScrapSiege.Siege
             var ground = Instantiate(groundQuadPrefab, groundCenter, Quaternion.Euler(90f, 0f, 0f));
             ground.transform.localScale = Vector3.one * groundQuadSize;
 
+            // Vantage measures the phone's height against this. Published before anything reads it
+            // so the first frame of Siege already has a correct posture reading rather than
+            // treating the player as fully leaned in.
+            if (boardPlane != null)
+                boardPlane.SetBoard(groundCenter);
+            else
+                Debug.LogError("SiegePhaseController: 'boardPlane' is not assigned - the vantage mechanic cannot know the table height and deploy precision will never vary.", this);
+
             var dummyBase = Instantiate(dummyBasePrefab, basePosition, Quaternion.identity);
             DummyBase = dummyBase.transform;
             DummyBaseHealth = dummyBase.GetComponent<BaseHealth>();
@@ -83,7 +98,9 @@ namespace ScrapSiege.Siege
             navMeshSurface.BuildNavMesh();
             NavMeshAreas.ApplyGlobalCost();
 
-            musterPhase.SpawnGarrison(fortify.ScannedObjects);
+            // Sentries face the player's side of the board, so their blind side is the far side -
+            // reachable only by physically walking around the table.
+            musterPhase.SpawnGarrison(fortify.ScannedObjects, tableOrigin);
 
             // Guarded rather than unconditional - previously a null DummyBaseHealth would throw
             // inside WatchBase() and abort StartSiege() before the lines below ever ran, silently
@@ -93,6 +110,7 @@ namespace ScrapSiege.Siege
 
             resourceEconomy.enabled = true;
             deploymentController.enabled = true;
+            if (rallyController != null) rallyController.enabled = true;
 
             OnSiegeStarted?.Invoke();
         }

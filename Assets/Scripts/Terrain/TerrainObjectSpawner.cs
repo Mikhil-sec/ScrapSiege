@@ -1,6 +1,7 @@
 using Unity.AI.Navigation;
 using UnityEngine;
 using UnityEngine.AI;
+using ScrapSiege.Core;
 using ScrapSiege.Monetization;
 
 namespace ScrapSiege.Terrain
@@ -41,6 +42,13 @@ namespace ScrapSiege.Terrain
             var primitive = PrimitiveForArchetype(data.Archetype, data.AspectRatio, roundnessAspectRatioThreshold);
             var go = GameObject.CreatePrimitive(primitive);
             go.name = $"Terrain_{data.Archetype}";
+
+            // Sight-blocking archetypes go on the occluder layer so LineOfSightController's
+            // raycasts hit them and nothing else. RubbleCover is deliberately excluded - plan.md
+            // defines it as passable cover that "blocks nothing visually", so it must affect
+            // pathing and garrison exposure without ever hiding an enemy.
+            if (BlocksLineOfSight(data.Archetype))
+                go.layer = SiegeLayers.TerrainOccluder;
 
             float height = HeightForCategory(data.Height);
             float sizeX = Mathf.Max(data.FootprintX, 0.05f) * marginMultiplier;
@@ -125,6 +133,27 @@ namespace ScrapSiege.Terrain
             modifier.center = new Vector3(0f, coverLaneVolumeHeight * 0.5f, 0f);
 
             return coverVolumeGO;
+        }
+
+        /// <summary>
+        /// Which archetypes hide what is behind them. Matches plan.md's archetype table: Wall,
+        /// Spire and Watchtower are hard blocks that block line of sight; PlainObstacle is a hard
+        /// block but low, so it still occludes; RubbleCover blocks nothing visually.
+        /// </summary>
+        public static bool BlocksLineOfSight(TerrainArchetype archetype)
+        {
+            switch (archetype)
+            {
+                case TerrainArchetype.WallBarricade:
+                case TerrainArchetype.SpireChokepoint:
+                case TerrainArchetype.Watchtower:
+                case TerrainArchetype.PlainObstacle:
+                    return true;
+
+                case TerrainArchetype.RubbleCover:
+                default:
+                    return false;
+            }
         }
 
         private float HeightForCategory(HeightCategory category)

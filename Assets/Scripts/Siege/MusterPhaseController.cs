@@ -19,7 +19,17 @@ namespace ScrapSiege.Siege
         [SerializeField] private int maxGarrisonUnits = 3;
         [SerializeField] private float navMeshSnapDistance = 0.2f;
 
-        public void SpawnGarrison(IReadOnlyList<TerrainObjectData> terrainObjects)
+        [Tooltip("Degrees of random yaw added to each sentry's facing. Without this every sentry " +
+                 "covers the identical bearing, so one walking position flanks all of them at once " +
+                 "and the flanking mechanic collapses into a single correct answer.")]
+        [SerializeField] private float facingJitterDegrees = 35f;
+
+        /// <summary>
+        /// Spawns the free starting garrison. <paramref name="threatOrigin"/> is where the player's
+        /// units advance from - sentries turn to face it, which puts their blind side away from the
+        /// attacker and makes walking around the table to reach that side a real tactic.
+        /// </summary>
+        public void SpawnGarrison(IReadOnlyList<TerrainObjectData> terrainObjects, Vector3 threatOrigin)
         {
             if (garrisonUnitPrefab == null)
             {
@@ -40,9 +50,23 @@ namespace ScrapSiege.Siege
                 if (!NavMesh.SamplePosition(obj.Center, out NavMeshHit hit, navMeshSnapDistance, NavMesh.AllAreas))
                     continue;
 
-                Instantiate(garrisonUnitPrefab, hit.position, Quaternion.identity);
+                Instantiate(garrisonUnitPrefab, hit.position, FacingToward(hit.position, threatOrigin));
                 spawned++;
             }
+        }
+
+        private Quaternion FacingToward(Vector3 from, Vector3 target)
+        {
+            Vector3 toThreat = target - from;
+            toThreat.y = 0f;
+
+            // Degenerate case: sentry spawned exactly on the threat origin. Any facing is as valid
+            // as another, so keep identity rather than feeding a zero vector to LookRotation.
+            if (toThreat.sqrMagnitude < 0.0001f) return Quaternion.identity;
+
+            Quaternion look = Quaternion.LookRotation(toThreat.normalized, Vector3.up);
+            float jitter = Random.Range(-facingJitterDegrees, facingJitterDegrees);
+            return look * Quaternion.Euler(0f, jitter, 0f);
         }
     }
 }

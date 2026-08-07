@@ -32,7 +32,17 @@ namespace ScrapSiege.Siege
         private NavMeshAgent agent;
         private BaseHealth targetBase;
 
+        // Where this unit is ultimately headed. Kept separate from agent.destination because a
+        // Rally order temporarily overrides the destination with a waypoint, and the unit has to
+        // know what to resume toward once it gets there.
+        private Vector3 finalDestination;
+        private bool hasRallyWaypoint;
+        private bool speedVarianceApplied;
+
         public NavMeshAgent Agent => agent;
+
+        /// <summary>True while diverting to a rally waypoint rather than heading for the base.</summary>
+        public bool IsRallying => hasRallyWaypoint;
 
         private void Awake()
         {
@@ -46,8 +56,36 @@ namespace ScrapSiege.Siege
         public void SetTarget(Vector3 position, BaseHealth targetBaseHealth)
         {
             targetBase = targetBaseHealth;
-            agent.speed *= Random.Range(speedVarianceMin, speedVarianceMax);
-            agent.SetDestination(JitteredDestination(position));
+
+            // Guarded so a second SetTarget call can't compound the multiplier into a unit that
+            // sprints across the whole table.
+            if (!speedVarianceApplied)
+            {
+                speedVarianceApplied = true;
+                agent.speed *= Random.Range(speedVarianceMin, speedVarianceMax);
+            }
+
+            finalDestination = JitteredDestination(position);
+            hasRallyWaypoint = false;
+            agent.SetDestination(finalDestination);
+        }
+
+        /// <summary>
+        /// Diverts this unit through a waypoint before continuing to its base target. Issued by
+        /// RallyController when the player is pulled back far enough to command the whole board.
+        /// Returns false if the waypoint isn't reachable, so the caller can avoid charging for a
+        /// no-op order.
+        /// </summary>
+        public bool RallyTo(Vector3 waypoint, float snapDistance)
+        {
+            if (agent == null || !agent.isOnNavMesh) return false;
+
+            if (!NavMesh.SamplePosition(waypoint, out NavMeshHit hit, snapDistance, agent.areaMask))
+                return false;
+
+            hasRallyWaypoint = true;
+            agent.SetDestination(hit.position);
+            return true;
         }
 
         private Vector3 JitteredDestination(Vector3 position)
@@ -76,6 +114,14 @@ namespace ScrapSiege.Siege
 
             if (agent.pathPending) return;
             if (agent.remainingDistance > arrivalDistance) return;
+
+            // Reached the rally waypoint, not the base - resume the original advance.
+            if (hasRallyWaypoint)
+            {
+                hasRallyWaypoint = false;
+                agent.SetDestination(finalDestination);
+                return;
+            }
 
             if (targetBase != null)
                 targetBase.TakeDamage(damageToBase);

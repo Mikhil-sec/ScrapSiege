@@ -37,6 +37,10 @@ namespace ScrapSiege.Siege
         [SerializeField] private GameObject unitPrefab;
         [SerializeField] private int unitCost = 1;
 
+        [Tooltip("Drives deploy precision from the phone's height above the board (plan.md Mechanic 1). " +
+                 "Optional - if unassigned, every deploy lands exactly on the tap.")]
+        [SerializeField] private ScrapSiege.Vantage.VantageController vantage;
+
         // How far to search for a valid walkable point near the tap - covers taps that land
         // just inside an obstacle's carved-out hole (e.g. tapping right next to a terrain object).
         [SerializeField] private float navMeshSnapDistance = 0.15f;
@@ -75,10 +79,17 @@ namespace ScrapSiege.Siege
             Vector2 screenPos = touch.position.ReadValue();
             if (!raycastManager.Raycast(screenPos, hits, TrackableType.PlaneWithinPolygon)) return;
 
+            // The vantage mechanic lives here: leaned in, scatter is ~0 and the unit lands exactly
+            // where tapped; pulled back for the overview, the drop spreads. Applied before the
+            // NavMesh snap so a scattered point still resolves to somewhere walkable.
+            Vector3 deployPoint = vantage != null
+                ? vantage.ApplyScatter(hits[0].pose.position)
+                : hits[0].pose.position;
+
             // Snap to the nearest walkable point rather than spawning exactly on the tap -
             // taps close to an obstacle would otherwise land inside its carved-out hole, leaving
             // the agent with nothing valid nearby to attach to.
-            if (!NavMesh.SamplePosition(hits[0].pose.position, out NavMeshHit navHit, navMeshSnapDistance, NavMesh.AllAreas))
+            if (!NavMesh.SamplePosition(deployPoint, out NavMeshHit navHit, navMeshSnapDistance, NavMesh.AllAreas))
                 return;
 
             if (!resourceEconomy.TrySpend(unitCost)) return;
