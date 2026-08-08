@@ -70,10 +70,19 @@ and where behaviour looked wrong we confirmed it against `adb logcat` instead of
 - **A OneDrive-synced project folder silently broke Unity's build pipeline** through file
   locking; the fix was relocating the whole project to local-only storage.
 - **Several bugs were invisible from code alone and only appeared on-device.** URP quietly
-  drops camera passthrough without an explicit Renderer Feature. NavMesh settings tuned for
-  humanoid-scale games were wildly wrong at tabletop scale — a default 5cm agent radius was
-  blocking gaps that looked wide open on screen. A Unity Inspector event-wiring trap made a
-  perfectly working resource counter permanently display zero.
+  drops camera passthrough without an explicit Renderer Feature. A Unity Inspector
+  event-wiring trap made a perfectly working resource counter permanently display zero.
+- **Unity's pathfinding has a hard floor we didn't know existed, and it cost us two sessions
+  before we found it.** Our units kept walking a short distance and stopping, so we tried
+  shrinking their navigation radius to fit our tiny board — and the setting kept silently
+  reverting. We assumed the Editor was rewriting our file on shutdown and worked around that
+  for a while. It wasn't. We finally proved it by writing a dozen different values directly
+  and reading them straight back: anything under five centimetres came back as exactly five
+  centimetres, always, on a brand-new setting too. Unity simply refuses to go smaller — a
+  reasonable limit for a humanoid game, catastrophic for a board the size of a placemat. The
+  fix wasn't a setting at all: we scaled the whole AR world up five times, so five real
+  centimetres of pathing room became one real centimetre. Confirmed by baking real pathfinding
+  data and asking it for an actual route, not by eye.
 - **The sneakiest bug of the project:** a win condition where the base correctly reached zero
   health and fired its destroy event — but a missing Inspector reference threw on the very
   next line, before the win screen could appear. Only pulling `adb logcat` mid-test proved
@@ -192,6 +201,10 @@ convincing were all wrong.
 
 - **The AI commander.** It's the missing half of the design: Rally, reacting to a threat, and
   difficulty tuning are all inert until there's an opponent making moves worth reacting to.
+- **Level tuning from our first full hands-on playtest.** Playing the flagship level end to end
+  for the first time showed cover was still too generous and the "one safe corridor" premise
+  wasn't actually being enforced — exactly the kind of thing that only shows up once a level
+  is genuinely playable rather than reasoned about on paper.
 - The player-side base and a real lose condition.
 - Board elevation — a raised plateau that would make line of sight genuinely three-dimensional,
   so you crouch to look along a ridge and rise to see over it. Held deliberately until the flat

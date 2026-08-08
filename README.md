@@ -10,9 +10,9 @@ Full game design — mechanics, level format, AI behaviour, monetization, timeli
 
 ## Current status
 
-The full loop is **playable end to end on device**: main menu → level select → AR scan → lock a plane → place the board (tap, drag, pinch, twist) → confirm → the level builds → siege.
+The full loop is **playable end to end on device and accepted by device testing (2026-08-08)**: main menu → level select → AR scan → lock a plane → place the board (tap, drag, pinch, twist) → confirm → the level builds → siege, with units correctly reaching the enemy base.
 
-> **⚠️ One open blocker (2026-08-08).** `ProjectSettings/NavMeshAreas.asset` has `agentRadius: 0.05`, which on a 33 cm-wide board erodes wider than the gaps the levels are built around — so The Narrows currently bakes as two disconnected halves and deployed units cannot reach the enemy base. It must be set to ~`0.012` **with the Unity Editor closed** (it silently reverts otherwise). Details in `plan.md` Section 10 and `CLAUDE.md`.
+> **Note on the AR world scale.** Unity hard-clamps NavMesh `agentRadius` to a 0.05 m floor, which is far too coarse for a 33 cm tabletop board — the game runs the AR world at 5x scale (`ScrapSiege.Core.WorldScale`) so that floor costs only 1 cm of real table. This is intentional and load-bearing, not a workaround to remove; see `plan.md` Section 10 before changing any distance value in the codebase.
 
 ### Working today
 
@@ -38,7 +38,9 @@ The full loop is **playable end to end on device**: main menu → level select �
 
 - Only **one generic unit type** — no combat variety yet.
 - **AR plane detection is this project's proven weak point.** See `plan.md` Section 10.
-- **Direct-vs-Covered routing has not been retested** since the cover-lane width was corrected (it used to blanket the whole board).
+- **The Narrows doesn't yet enforce its "one safe corridor" premise** — both sides of the wall are currently viable routes, and the cover lane and sentry range don't line up to punish either one. Design gap, not a bug; see `plan.md` Section 10.
+- **`SiegeUnit.health` is set to 10 in the prefab** (leftover from early testing to distinguish real deaths from a since-fixed disappearing-unit bug), well above the code default of 2 — makes units feel unkillable until reset.
+- **`coverLaneMargin` is still an absolute real-world distance**, unlike almost every other gameplay value in the project, which makes cover disproportionately generous on a small board.
 - **RevenueCat purchases don't complete on a real device yet** — the product only exists on the Test Store; real builds go through Google Play Billing, which needs a Play Console product.
 - **Landscape only.** All canvases are authored at 1920×1080; portrait would need re-authoring, not a settings flip.
 
@@ -54,7 +56,8 @@ The full loop is **playable end to end on device**: main menu → level select �
 
 ```
 Assets/Scripts/                 - ScrapSiege.Runtime.asmdef (named assembly, referenced by Tests)
-  Core/     - SiegeLayers (terrain-occluder layer), BoardPlane (the one source of board height)
+  Core/     - SiegeLayers (terrain-occluder layer), BoardPlane (the one source of board height),
+              WorldScale (the AR-world scale factor - see plan.md Section 10), MaterialSlots
   Levels/   - LevelDefinition (authored map, normalised space), LevelBuilder, LevelCatalog,
               BoardPlacementController (tap/drag/pinch/twist), LevelMatchController (match flow)
   Vantage/  - VantageMath (pure, unit-tested), VantageController, DeployReticle
