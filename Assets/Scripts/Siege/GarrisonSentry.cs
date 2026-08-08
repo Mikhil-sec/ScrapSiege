@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.AI;
+using ScrapSiege.Core;
 using ScrapSiege.Terrain;
 
 namespace ScrapSiege.Siege
@@ -17,7 +18,16 @@ namespace ScrapSiege.Siege
     /// </summary>
     public class GarrisonSentry : MonoBehaviour
     {
-        [SerializeField] private float detectionRadius = 0.5f;
+        [Tooltip("Resolved from the board size at spawn - see ConfigureForBoard. The serialized value " +
+                 "is only the fallback for the legacy scan/Fortify flow.")]
+        [SerializeField] private float detectionRadius = 0.12f;
+
+        [Tooltip("Detection range as a fraction of board length. At the old absolute 0.2m a sentry " +
+                 "covered a THIRD of a 0.60m board, so there was barely anywhere safe to walk and the " +
+                 "Direct-vs-Covered route choice lost most of its meaning.")]
+        [SerializeField] private float detectionRadiusFraction = 0.20f;
+
+        [SerializeField] private float navMeshSampleFraction = 0.02f;
 
         [Tooltip("Total width of the covered wedge in degrees, bisected by this object's forward. " +
                  "360 restores the old full-circle behaviour.")]
@@ -33,6 +43,31 @@ namespace ScrapSiege.Siege
 
         /// <summary>Read by SentryArcVisualizer so the drawn wedge always matches the real rule.</summary>
         public float FacingArcDegrees => facingArcDegrees;
+
+        /// <summary>
+        /// Rescales this sentry's reach to the board it is defending. Called by
+        /// MusterPhaseController immediately after spawning, which is after Awake but before Start -
+        /// which is exactly why SentryArcVisualizer builds its fan in Start rather than Awake.
+        /// </summary>
+        public void ConfigureForBoard(float boardLength)
+        {
+            if (boardLength <= 0f) return;
+
+            detectionRadius = detectionRadiusFraction * boardLength;
+            navMeshSampleDistance = navMeshSampleFraction * boardLength;
+        }
+
+        private void Awake()
+        {
+            // Same reasoning as SiegeUnit: the prefab is authored at true real-world size, and the
+            // AR world is scaled up, so the visual has to follow or the sentry is a fifth the height
+            // of the units it is shooting at. detectionRadius/navMeshSampleDistance are REAL-metre
+            // fallbacks here - ConfigureForBoard overwrites both with board-relative values the
+            // moment MusterPhaseController spawns this, which is right after Awake.
+            transform.localScale *= WorldScale.Scale;
+            detectionRadius = WorldScale.Metres(detectionRadius);
+            navMeshSampleDistance = WorldScale.Metres(navMeshSampleDistance);
+        }
 
         private void OnEnable()
         {

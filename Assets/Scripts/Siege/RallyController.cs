@@ -36,8 +36,16 @@ namespace ScrapSiege.Siege
         [Tooltip("Seconds before Rally can be issued again, so it stays a decision rather than a spam button.")]
         [SerializeField] private float cooldownSeconds = 8f;
 
-        [Tooltip("How far from the tapped point to search for a walkable rally waypoint.")]
-        [SerializeField] private float navMeshSnapDistance = 0.25f;
+        [Tooltip("Supplies the board length the rally snap radius is scaled against.")]
+        [SerializeField] private ScrapSiege.Core.BoardPlane boardPlane;
+
+        [Tooltip("How far from the tapped point to search for a walkable rally waypoint, as a " +
+                 "fraction of board length. The old absolute 0.25m was 42% of a 0.60m board, so a " +
+                 "rally could land almost anywhere regardless of where the player actually tapped.")]
+        [SerializeField] private float navMeshSnapFraction = 0.06f;
+
+        [Tooltip("Used only when no board has been established (the legacy scan/Fortify flow).")]
+        [SerializeField] private float navMeshSnapFallback = 0.08f;
 
         [Header("Events")]
         /// <summary>True while waiting for the player to tap a destination.</summary>
@@ -144,11 +152,16 @@ namespace ScrapSiege.Siege
                 return;
             }
 
+            float boardLength = boardPlane != null ? boardPlane.Length : 0f;
+            float snapDistance = boardLength > 0f
+                ? navMeshSnapFraction * boardLength
+                : ScrapSiege.Core.WorldScale.Metres(navMeshSnapFallback);
+
             int redirected = 0;
             foreach (var unit in SiegeUnit.Active)
             {
                 if (unit == null) continue;
-                if (unit.RallyTo(worldPoint, navMeshSnapDistance)) redirected++;
+                if (unit.RallyTo(worldPoint, snapDistance)) redirected++;
             }
 
             SetArmed(false);

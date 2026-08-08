@@ -31,12 +31,27 @@ a slower one that hugs cover to stay out of garrison fire.
 ## How we built it
 
 Unity 6 with AR Foundation over ARCore, Android-first because that's the hardware actually
-available for daily testing — two phones, neither with a depth sensor, which ruled out every
+available for daily testing — none of it with a depth sensor, which ruled out every
 depth-based shortcut from day one. Pathing uses Unity's NavMesh with custom area costs, so
 the "safer" route through cover is a genuine distance/risk trade-off rather than a
 differently-coloured line. Monetization runs on the RevenueCat Unity SDK, configured through
 the RevenueCat MCP server directly against our own dashboard: one entitlement gating real
 content, not a placeholder toggle.
+
+Levels are authored in **normalised board space** — every position is a 0–1 coordinate rather
+than a measurement — so a single hand-designed map projects correctly onto a coffee table or a
+dining table at whatever size the player pinches it to. Adding a level is a data file and
+nothing else. A small validator runs over them and checks the things that are invisible until
+you play: pieces off the board, terrain walling in an objective, a map asking for more
+defenders than it has positions for. It caught two real design bugs before either reached the
+device.
+
+The art is deliberately **static low-poly models with procedural animation in code, not rigged
+characters**. A unit is about five centimetres tall on a real table seen through a phone — rig
+deformation is invisible at that size, while gross motion isn't. So the troopers are built from
+separate parts with real joint pivots, and the marching, bobbing, leaning and attack lunge are
+driven from the navigation agent's actual velocity, keyed to distance travelled so a unit
+stopped at a chokepoint visibly stops walking instead of moon-walking on the spot.
 
 There is **zero machine learning anywhere in the app**, deliberately. The AI commander is
 ordinary game AI — explicit thresholds and utility scoring, hand-written and debuggable. We
@@ -70,6 +85,27 @@ and where behaviour looked wrong we confirmed it against `adb logcat` instead of
   allocated in its own `Start()`, so configuring it from another script's `Awake()` threw a
   null reference that only appeared on-device — with a second, independent failure stacked on
   top of it.
+- **We shipped a mechanic that worked perfectly and meant nothing.** Camera-height vantage
+  went to the device and did exactly what it was designed to do — and playing it revealed the
+  design was wrong. Leaning in bought precision; standing back bought *information*. But
+  information is passive and free, so the optimal play was to glance up once and then stay
+  leaned in forever. Posture had become a glance, not a stance. The fix wasn't tuning, it was
+  giving the high position an **action**: a Rally order that redirects every deployed unit
+  through a new lane, available only when you're physically pulled back far enough to see the
+  whole board. You can't command what you can't see.
+- **Then the same test said precision felt pointless — and it was right.** Chasing it found a
+  single number: the safe "cover lane" laid beside each piece of terrain extended a quarter of
+  a metre in every direction. On a sixty-centimetre board that made cover *the entire table*.
+  Cover was free and unmissable, so placing a unit carefully bought nothing. One value, and a
+  whole mechanic came back to life.
+- **A menu where every button was dead, with no error anywhere.** The buttons rendered, were
+  marked interactable, had the right handlers attached, and did nothing on tap. Unity's default
+  new-scene template simply doesn't include an EventSystem, and without one no UI input is
+  processed at all — silently. Immediately after that, board placement had the same *flavour* of
+  bug for a different reason: our own touch code counted currently-held fingers before deciding
+  what to do, and a quick tap can report "pressed this frame" while already reading as released.
+  Fast taps were being thrown away. Both were the kind of failure that produces no log line and
+  no exception — just a thing that doesn't happen.
 - **The biggest one: we built a two-player game and then cut it.** Weeks of work went into
   a full LAN implementation — Netcode for GameObjects over direct local network, UDP host
   discovery, a cloud-free shared coordinate frame where both players tap the same two real
@@ -81,6 +117,30 @@ and where behaviour looked wrong we confirmed it against `adb logcat` instead of
   being unreliable, and a two-player match can't start until both devices agree on where the
   board is.
 
+### The bug that taught us to stop trusting our own eyes
+
+Late in development the game *looked* finished but played wrong: troopers vanished a second
+after deploying, and the victory screen fired even though nobody ever saw a unit reach the
+enemy base. The obvious reading — the one we'd have shipped a fix for — was that the "hit the
+base" trigger radius was too generous.
+
+It wasn't. Instrumenting the actual `NavMeshAgent` state every frame showed something no
+amount of code-reading would have surfaced: `remainingDistance` silently returns **0** when an
+agent has no valid path — not an error, not infinity — which is byte-for-byte identical to
+"I have arrived." Our arrival check couldn't tell the difference. The units weren't reaching
+the base early; they were falling off the navigation mesh on spawn and *reporting* arrival.
+
+Chasing that honestly then exposed three more real defects hiding behind it, each of which had
+been invisible because the false arrival masked them: the cover corridor a unit is supposed to
+route *through* was being carved as a solid wall; the "Direct" deploy route was barred from
+cover entirely, contradicting its own design; and a whole family of values — unit speed,
+arrival radius, sentry range, deploy scatter — were tuned in absolute metres on a board whose
+size the player chooses at runtime, so a unit crossed a 60 cm table in two seconds.
+
+The lesson we actually took: **a plausible explanation is not a diagnosis.** Every fix in that
+sequence came from measuring the running system, and the first three theories we found
+convincing were all wrong.
+
 ## Accomplishments that we're proud of
 
 - **Knowing when to cut.** The two-player build wasn't abandoned because it was hard or
@@ -88,6 +148,13 @@ and where behaviour looked wrong we confirmed it against `adb logcat` instead of
   unreliable, and shipping something honest mattered more than shipping the original plan. It
   is preserved on a branch rather than deleted, and the pivot removed both of the project's
   worst dependencies at once.
+- **Redesigning a mechanic that already worked**, because playing it showed it had a dominant
+  strategy. It would have been easy to call vantage "done" — it shipped, it did what the spec
+  said. Rally exists because we were willing to say the spec was wrong.
+- **Three levels that each teach one thing.** They aren't decoration: one is a single cover
+  corridor that punishes a loose drop, one hides two sentries behind a spire so you have to
+  physically move to find them, and one splits the field into lanes that only rejoin deep, so
+  committing wrongly costs you a Rally to fix.
 - A debugging habit that consistently found true root causes on real hardware — via logcat,
   on the device — rather than guessing from code review.
 - A route-choice mechanic (fast-and-exposed vs. slow-and-covered) with real tactical weight,
@@ -99,24 +166,37 @@ and where behaviour looked wrong we confirmed it against `adb logcat` instead of
 
 ## What we learned
 
-- **Bugs on real hardware often look nothing like their cause.** Twice, a broken-looking
-  button turned out to be an exception in a completely different script that had silently
-  aborted a chunk of setup.
+- **Bugs on real hardware often look nothing like their cause.** Repeatedly, a broken-looking
+  button turned out to be something else entirely — an exception in an unrelated script, a
+  missing scene object, a touch being discarded a frame early.
+- **"It works" and "it's fun" are different tests, and only the device runs the second one.**
+  Vantage passed every unit test and still needed redesigning the first time it was played.
+  Two of our best design decisions came from playing something correct and finding it hollow.
+- **A mechanic the player can't observe can't be learned.** Deploy scatter was working from the
+  start and felt like nothing, because you only ever saw where a unit landed, never how precise
+  you were being. Drawing the current precision as a ring on the table *before* the tap changed
+  it from invisible maths into something you can feel yourself getting better at.
 - **Test the riskiest assumption before building on top of it.** We validated cross-device
   networking thoroughly and the AR surface detection underneath it barely at all. The layer
   we didn't stress-test is the one that ended the direction.
 - **Designing for the worst available device first** produced a more robust system than
   designing for the best one would have.
+- **Verify the thing you changed, not the thing you intended to change.** Setting a value and
+  assuming it took hold cost us real time more than once — an editor silently discarding a
+  file edit, a reference assignment quietly doing nothing. Reading the value back afterwards is
+  cheap and catches all of it.
 - A defensive null-check that quietly does nothing can hide a real bug for an entire test
   session — failing loudly is almost always better than failing silently.
 
 ## What's next for Scrap Siege
 
-- Board placement and authored level definitions, replacing the old scanning flow.
-- The AI commander, plus the player-side base and lose condition.
-- The two mechanics the whole design now rests on: camera-height vantage, and true
-  line-of-sight from the player's real viewpoint.
+- **The AI commander.** It's the missing half of the design: Rally, reacting to a threat, and
+  difficulty tuning are all inert until there's an opponent making moves worth reacting to.
+- The player-side base and a real lose condition.
+- Board elevation — a raised plateau that would make line of sight genuinely three-dimensional,
+  so you crouch to look along a ridge and rise to see over it. Held deliberately until the flat
+  maps are proven, because navigation at tabletop scale has already bitten us twice.
+- More authored levels, star ratings, sound.
 - Pro level packs behind the already-built entitlement, and a Google Play Console product so
   a real purchase can complete on a device rather than only in the Editor.
-- An art and animation pass over the placeholder terrain, then the demo video and submission
-  assets.
+- The demo video and submission assets.

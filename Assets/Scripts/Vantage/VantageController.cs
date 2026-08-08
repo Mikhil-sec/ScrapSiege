@@ -18,16 +18,28 @@ namespace ScrapSiege.Vantage
         [SerializeField] private Camera arCamera;
         [SerializeField] private BoardPlane board;
 
-        [Header("Posture band (metres above the board surface)")]
+        // The posture band stays in ABSOLUTE metres on purpose, unlike everything else that was made
+        // board-relative. It describes where the player's arms are - the ergonomics of holding a
+        // phone over a table - not how big the board is, and it has been confirmed to feel right on
+        // device. Scaling it to board length would mean a small board demanded a different posture
+        // for the same effect, which is exactly the connection this mechanic is built on.
+        //
+        // These are REAL metres. The AR world is scaled up by WorldScale.Scale, so they are converted
+        // in Update rather than being re-authored - "20cm above the table" stays readable here.
+        [Header("Posture band (REAL metres above the board surface)")]
         [Tooltip("At or below this height the player is fully 'leaned in': placement is pixel-tight.")]
         [SerializeField] private float leanedInHeight = 0.20f;
 
         [Tooltip("At or above this height the player is fully 'pulled back': maximum scatter, Rally available.")]
         [SerializeField] private float pulledBackHeight = 0.65f;
 
-        [Header("Deploy scatter (metres)")]
-        [SerializeField] private float minScatterRadius = 0.005f;
-        [SerializeField] private float maxScatterRadius = 0.10f;
+        [Header("Deploy scatter (fractions of board length)")]
+        [Tooltip("Scatter has to be a fraction of the board, not metres. The old absolute 0.10m max " +
+                 "was 17% of a 0.60m board - a pulled-back drop could miss by a sixth of the whole " +
+                 "map, which reads as the control being unreliable rather than as a skill trade-off.")]
+        [SerializeField] private float minScatterFraction = 0.008f;
+
+        [SerializeField] private float maxScatterFraction = 0.075f;
 
         [Header("Rally gate")]
         [Tooltip("Vantage (0..1) at which the Rally order unlocks. You cannot command what you cannot see.")]
@@ -53,7 +65,15 @@ namespace ScrapSiege.Vantage
         public float Vantage01 { get; private set; }
 
         /// <summary>Metres of random offset applied to a deploy tap at the current posture.</summary>
-        public float ScatterRadius => VantageMath.ScatterRadius(Vantage01, minScatterRadius, maxScatterRadius);
+        public float ScatterRadius
+        {
+            get
+            {
+                float length = board != null ? board.Length : 0.6f;
+                return VantageMath.ScatterRadius(
+                    Vantage01, minScatterFraction * length, maxScatterFraction * length);
+            }
+        }
 
         /// <summary>True when the player is high enough to issue a Rally order.</summary>
         public bool IsRallyReady { get; private set; }
@@ -79,11 +99,14 @@ namespace ScrapSiege.Vantage
         {
             if (arCamera == null || board == null) return;
 
+            // The band is authored in REAL metres (see the field comments) but the camera and the
+            // board live in the scaled AR world, so it has to be converted before comparison.
+            // Leaving this unconverted makes the player fully "pulled back" while still leaning in.
             float raw = VantageMath.Normalized(
                 arCamera.transform.position.y,
                 board.Height,
-                leanedInHeight,
-                pulledBackHeight);
+                WorldScale.Metres(leanedInHeight),
+                WorldScale.Metres(pulledBackHeight));
 
             // Snap on the first frame rather than easing up from 0, otherwise the player starts
             // every match with a second of artificially perfect precision.

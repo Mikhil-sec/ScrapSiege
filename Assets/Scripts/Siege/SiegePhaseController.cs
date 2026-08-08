@@ -74,11 +74,13 @@ namespace ScrapSiege.Siege
 
             Vector3 tableOrigin = FindTableReferencePoint();
             Vector3 flatForward = Vector3.ProjectOnPlane(arCamera.transform.forward, Vector3.up).normalized;
-            Vector3 basePosition = tableOrigin + flatForward * dummyBaseDistance;
+            // Legacy scan/Fortify path. Both distances are authored in REAL metres and land in the
+            // scaled AR world, so they convert like everything else.
+            Vector3 basePosition = tableOrigin + flatForward * ScrapSiege.Core.WorldScale.Metres(dummyBaseDistance);
             Vector3 groundCenter = (tableOrigin + basePosition) * 0.5f;
 
             var ground = Instantiate(groundQuadPrefab, groundCenter, Quaternion.Euler(90f, 0f, 0f));
-            ground.transform.localScale = Vector3.one * groundQuadSize;
+            ground.transform.localScale = Vector3.one * ScrapSiege.Core.WorldScale.Metres(groundQuadSize);
 
             // Vantage measures the phone's height against this. Published before anything reads it
             // so the first frame of Siege already has a correct posture reading rather than

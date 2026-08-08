@@ -17,8 +17,11 @@ namespace ScrapSiege.Vision
                  "(a 5cm sphere) where a hand-typed height silently samples empty air above the unit.")]
         [SerializeField] private bool deriveSamplesFromBounds = true;
 
+        // NOT converted by WorldScale, deliberately: this is used as a LOCAL-space offset and pushed
+        // through TransformPoint, so the object's own (already world-scaled) transform applies the
+        // conversion. Multiplying here would double-apply it.
         [Tooltip("Manual fallback when the above is off, or when the object has no renderer: " +
-                 "topmost sample height above this transform, in metres.")]
+                 "topmost sample height above this transform, in LOCAL units.")]
         [SerializeField] private float sampleHeight = 0.05f;
 
         [Tooltip("Fraction of the object's height to pull the top and bottom samples inward, so " +

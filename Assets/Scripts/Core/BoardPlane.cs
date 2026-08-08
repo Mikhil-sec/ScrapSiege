@@ -18,25 +18,46 @@ namespace ScrapSiege.Core
         [Tooltip("Used before a real board exists (Editor play without AR). Height in metres.")]
         [SerializeField] private float fallbackHeight;
 
+        [Tooltip("Board length assumed before a real board is placed - and by the legacy scan/Fortify " +
+                 "flow, which has no authored board to measure. Authored in REAL metres; converted " +
+                 "into the scaled AR world at Awake.")]
+        [SerializeField] private float fallbackLength = 0.6f;
+
         /// <summary>World-space Y of the playing surface.</summary>
         public float Height { get; private set; }
 
         /// <summary>World-space centre of the board, used by the AI and by arc facing.</summary>
         public Vector3 Centre { get; private set; }
 
+        /// <summary>
+        /// The board's real length in metres.
+        ///
+        /// This is the denominator for every gameplay distance. Levels are authored in normalised
+        /// space and land on whatever size table the player chose, so anything tuned as an absolute
+        /// metre value is really a hidden assumption about board size - and several of them were
+        /// wrong by 3-5x once boards got small (a sentry covering a third of the map, a rally tap
+        /// snapping 42% of the board away). Read this and scale.
+        /// </summary>
+        public float Length { get; private set; }
+
         /// <summary>False until a real surface has been established - readers should degrade gracefully.</summary>
         public bool IsEstablished { get; private set; }
 
         private void Awake()
         {
-            Height = fallbackHeight;
-            Centre = new Vector3(0f, fallbackHeight, 0f);
+            Height = WorldScale.Metres(fallbackHeight);
+            Centre = new Vector3(0f, Height, 0f);
+            Length = WorldScale.Metres(fallbackLength);
         }
 
-        public void SetBoard(Vector3 centre)
+        /// <summary>Legacy scan/Fortify entry point - there is no authored board, so length is left at the fallback.</summary>
+        public void SetBoard(Vector3 centre) => SetBoard(centre, Length);
+
+        public void SetBoard(Vector3 centre, float length)
         {
             Centre = centre;
             Height = centre.y;
+            if (length > WorldScale.Metres(0.01f)) Length = length;
             IsEstablished = true;
         }
 

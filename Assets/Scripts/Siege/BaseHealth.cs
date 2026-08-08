@@ -22,6 +22,19 @@ namespace ScrapSiege.Siege
             CurrentHealth = maxHealth;
         }
 
+        /// <summary>
+        /// Overrides the prefab's health for this instance. Authored levels tune base HP per map
+        /// (a short skirmish and a long siege want different numbers off the same prefab), so the
+        /// value has to be settable after Instantiate rather than baked into the asset.
+        /// </summary>
+        public void ResetTo(int newMaxHealth)
+        {
+            maxHealth = Mathf.Max(1, newMaxHealth);
+            CurrentHealth = maxHealth;
+            IsDestroyed = false;
+            OnHealthChanged?.Invoke(CurrentHealth);
+        }
+
         public void TakeDamage(int amount)
         {
             if (IsDestroyed) return;

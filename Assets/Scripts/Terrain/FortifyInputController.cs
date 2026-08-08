@@ -94,7 +94,7 @@ namespace ScrapSiege.Terrain
                 cornerAMarker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                 cornerAMarker.name = "FortifyCornerMarker";
                 cornerAMarker.transform.position = worldPos;
-                cornerAMarker.transform.localScale = Vector3.one * 0.02f;
+                cornerAMarker.transform.localScale = Vector3.one * ScrapSiege.Core.WorldScale.Metres(0.02f);
 
                 state = State.WaitingSecondCorner;
                 OnAwaitingSecondCorner?.Invoke();

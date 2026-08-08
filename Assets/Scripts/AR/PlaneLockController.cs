@@ -25,10 +25,20 @@ namespace ScrapSiege.AR
     {
         [SerializeField] private ARPlaneManager planeManager;
         [SerializeField] private ARRaycastManager raycastManager;
+
+        [Tooltip("Legacy scan/Fortify flow. Leave assigned only if using the scavenged-terrain path.")]
         [SerializeField] private FortifyInputController fortify;
 
+        [Tooltip("The authored-level flow. When assigned, locking a plane starts board placement " +
+                 "instead of Fortify - this is the current main path.")]
+        [SerializeField] private ScrapSiege.Levels.BoardPlacementController boardPlacement;
+
         [Header("Lock rules")]
-        [Tooltip("Smallest polygon area (m^2) accepted as a table. 0.02 is roughly a 14cm square - " +
+        // NOT scaled by WorldScale, deliberately. ARPlane.boundary is in plane-LOCAL space, so
+        // PolygonArea returns genuine real-world m^2 no matter what uniform scale the XR Origin
+        // carries - only the plane's rendered size changes. Multiplying this by WorldScale would
+        // silently demand a ~70cm square table before the Lock button ever lit up.
+        [Tooltip("Smallest polygon area (REAL m^2) accepted as a table. 0.02 is roughly a 14cm square - " +
                  "deliberately small, because ARCore grows a plane outward from a tiny seed and the " +
                  "player should be able to commit as soon as the board is plausibly covered.")]
         [SerializeField] private float minLockableArea = 0.02f;
@@ -65,16 +75,19 @@ namespace ScrapSiege.AR
         {
             if (planeManager == null) Debug.LogError("PlaneLockController: Plane Manager is not assigned - scanning and locking will not work.", this);
             if (raycastManager == null) Debug.LogError("PlaneLockController: Raycast Manager is not assigned - the aimed-plane preference will fall back to largest-plane.", this);
-            if (fortify == null) Debug.LogError("PlaneLockController: Fortify is not assigned - locking a plane will not start the Fortify phase.", this);
+            if (fortify == null && boardPlacement == null)
+                Debug.LogError("PlaneLockController: neither Fortify nor Board Placement is assigned - locking a plane will lead nowhere.", this);
 
             // Remember whatever detection mode the scene was authored with so Rescan restores
             // exactly that, rather than hardcoding an assumption about horizontal-only.
             if (planeManager != null && planeManager.requestedDetectionMode != PlaneDetectionMode.None)
                 scanDetectionMode = planeManager.requestedDetectionMode;
 
-            // Fortify must not run until a plane is locked. Enforced here rather than trusting
-            // the Inspector checkbox, matching how UnitDeploymentController gates itself.
+            // Neither the Fortify nor the placement phase may run until a plane is locked. Enforced
+            // here rather than trusting the Inspector checkbox, matching how UnitDeploymentController
+            // gates itself.
             if (fortify != null) fortify.enabled = false;
+            if (boardPlacement != null) boardPlacement.enabled = false;
         }
 
         private void OnEnable()
@@ -182,7 +195,13 @@ namespace ScrapSiege.AR
             SetOtherPlanesVisible(false);
             SetOutlineLocked(LockedPlane, true);
 
-            if (fortify != null)
+            // Board placement is the current main path; Fortify is only started when placement is
+            // absent, so a scene with both wired can't run two conflicting input phases at once.
+            if (boardPlacement != null)
+            {
+                boardPlacement.enabled = true;
+            }
+            else if (fortify != null)
             {
                 fortify.SetLockedPlane(LockedPlane);
                 fortify.enabled = true;
@@ -190,6 +209,20 @@ namespace ScrapSiege.AR
 
             OnLockReadyChanged?.Invoke(false);
             OnPlaneLocked?.Invoke();
+        }
+
+        /// <summary>
+        /// Hides the locked plane's own outline, keeping the plane itself (and its raycast target)
+        /// alive. Called once the board is committed: up to that point the outline is what tells the
+        /// player which surface they locked, but during the siege it draws a large white polygon
+        /// straight across the battlefield and competes with the board for attention.
+        /// </summary>
+        public void HideLockedPlaneVisual()
+        {
+            if (LockedPlane == null) return;
+
+            foreach (var renderer in LockedPlane.GetComponentsInChildren<Renderer>(true))
+                renderer.enabled = false;
         }
 
         /// <summary>
@@ -218,6 +251,20 @@ namespace ScrapSiege.AR
                 fortify.SetLockedPlane(null);
                 fortify.enabled = false;
             }
+
+            // The board was positioned against the plane being thrown away, so it has to go too.
+            if (boardPlacement != null)
+            {
+                boardPlacement.enabled = false;
+                if (boardPlacement.BoardRoot != null)
+                    boardPlacement.BoardRoot.gameObject.SetActive(false);
+            }
+
+            // Undo HideLockedPlaneVisual - rescanning has to show outlines again or the player is
+            // sweeping a table with no feedback at all.
+            if (LockedPlane != null)
+                foreach (var renderer in LockedPlane.GetComponentsInChildren<Renderer>(true))
+                    renderer.enabled = true;
 
             SetOutlineLocked(LockedPlane, false);
             LockedPlane = null;

@@ -19,6 +19,23 @@ namespace ScrapSiege.Terrain
         /// <summary>The CoverLane NavMesh tagging volume, if this archetype creates one (RubbleCover/WallBarricade). Null otherwise.</summary>
         public GameObject CoverVolume;
 
+        /// <summary>
+        /// Explicit world yaw for the spawned visual. Set by authored levels, which place pieces at
+        /// arbitrary angles; left null by the scan/Fortify flow, where orientation is inferred from
+        /// which footprint axis is longer. Corners still describe the *unrotated* footprint, so
+        /// FootprintX/Z stay meaningful as width and depth.
+        /// </summary>
+        public float? YawOverrideDegrees;
+
+        /// <summary>
+        /// Explicit world height in metres for the spawned visual, overriding the fixed
+        /// <see cref="HeightCategory"/> table. Set by authored levels so a piece's height scales with
+        /// the board the same way its footprint already does - without this a "Tall" piece is a fixed
+        /// 0.30m regardless of board size, which on a 0.60m board is half the board's length. Left
+        /// null by the scan/Fortify flow, where the categories describe a real measured object.
+        /// </summary>
+        public float? HeightOverrideMetres;
+
         public Vector3 Center => (CornerA + CornerB) * 0.5f;
 
         /// <summary>Footprint extent along world X.</summary>

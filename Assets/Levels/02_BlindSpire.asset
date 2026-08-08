@@ -1,0 +1,64 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5af290a2ae7e47b4a895987ee87ad2a8, type: 3}
+  m_Name: 02_BlindSpire
+  m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Levels.LevelDefinition
+  displayName: Blind Spire
+  briefing: Something is behind that spire. You will not see it from where you are
+    standing - move around the table.
+  levelNumber: 2
+  requiresPro: 0
+  boardAspect: 0.62
+  terrain:
+  - archetype: 4
+    position: {x: 0.36, y: 0.66}
+    size: {x: 0.1, y: 0.1}
+    rotationDegrees: 0
+    height: 2
+  - archetype: 4
+    position: {x: 0.64, y: 0.68}
+    size: {x: 0.1, y: 0.1}
+    rotationDegrees: 0
+    height: 2
+  - archetype: 2
+    position: {x: 0.5, y: 0.5}
+    size: {x: 0.2, y: 0.2}
+    rotationDegrees: 0
+    height: 2
+  - archetype: 3
+    position: {x: 0.12, y: 0.44}
+    size: {x: 0.05, y: 0.28}
+    rotationDegrees: 0
+    height: 1
+  - archetype: 3
+    position: {x: 0.88, y: 0.44}
+    size: {x: 0.05, y: 0.28}
+    rotationDegrees: 0
+    height: 1
+  - archetype: 1
+    position: {x: 0.24, y: 0.6}
+    size: {x: 0.1, y: 0.1}
+    rotationDegrees: 0
+    height: 0
+  - archetype: 1
+    position: {x: 0.76, y: 0.6}
+    size: {x: 0.1, y: 0.1}
+    rotationDegrees: 0
+    height: 0
+  playerBasePosition: {x: 0.5, y: 0.07}
+  enemyBasePosition: {x: 0.5, y: 0.93}
+  startingResources: 4
+  playerBaseHealth: 10
+  enemyBaseHealth: 10
+  maxGarrisonUnits: 2
+  parTimeSeconds: 140
+  parUnitsLost: 5

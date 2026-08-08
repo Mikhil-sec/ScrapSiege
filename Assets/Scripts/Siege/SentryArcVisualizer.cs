@@ -34,7 +34,20 @@ namespace ScrapSiege.Siege
 
         private GameObject arcObject;
 
-        private void Awake()
+        /// <summary>
+        /// Built in Start, not Awake, because the sentry's detection radius is only rescaled to the
+        /// board (GarrisonSentry.ConfigureForBoard) after it is spawned - which happens after Awake.
+        /// Building in Awake drew the wedge at the un-scaled fallback radius, so the visual claimed
+        /// a range the sentry did not actually have. Unity guarantees every Awake completes before
+        /// any Start, so by here the real radius is in.
+        /// </summary>
+        private void Start()
+        {
+            Rebuild();
+        }
+
+        /// <summary>Regenerates the fan from the sentry's current arc settings.</summary>
+        public void Rebuild()
         {
             var sentry = GetComponent<GarrisonSentry>();
             if (sentry == null) return;
@@ -44,6 +57,8 @@ namespace ScrapSiege.Siege
                 Debug.LogWarning("SentryArcVisualizer: Arc Base Material is not assigned - the sentry's covered arc will be invisible, which hides the flanking mechanic from the player.", this);
                 return;
             }
+
+            if (arcObject != null) Destroy(arcObject);
 
             BuildArc(sentry.DetectionRadius, sentry.FacingArcDegrees);
         }
@@ -60,8 +75,21 @@ namespace ScrapSiege.Siege
             // Parented so it inherits the sentry's rotation - rotating the sentry rotates the
             // wedge - but positioned flat at the sentry's own height on the table.
             arcObject.transform.SetParent(transform, worldPositionStays: false);
-            arcObject.transform.localPosition = new Vector3(0f, surfaceOffset, 0f);
             arcObject.transform.localRotation = Quaternion.identity;
+
+            // DetectionRadius is a WORLD-space distance (it is a fraction of board length), but the
+            // sentry prefab is authored at roughly 0.04 localScale - so a fan mesh built at that
+            // radius and parented here rendered at ~4% of the real range, a speck at the sentry's
+            // feet instead of the range indicator this is meant to be. That is why the covered area
+            // read as illegible on device. Cancel the parent's scale out, exactly as
+            // BoardPlacementController does for the board outline.
+            float inverseParentScale = 1f / Mathf.Max(transform.lossyScale.x, 1e-6f);
+            arcObject.transform.localScale = Vector3.one * inverseParentScale;
+
+            // localPosition is scaled by the PARENT, not by the object's own localScale, so the lift
+            // needs the same correction to end up at a true real-world offset.
+            arcObject.transform.localPosition =
+                new Vector3(0f, ScrapSiege.Core.WorldScale.Metres(surfaceOffset) * inverseParentScale, 0f);
 
             var filter = arcObject.AddComponent<MeshFilter>();
             var renderer = arcObject.AddComponent<MeshRenderer>();

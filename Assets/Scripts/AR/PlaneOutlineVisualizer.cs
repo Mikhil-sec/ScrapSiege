@@ -86,7 +86,9 @@ namespace ScrapSiege.AR
 
             line.startColor = color;
             line.endColor = color;
-            line.widthMultiplier = isLocked ? lockedLineWidth : lineWidth;
+            // The plane's transform carries the XR Origin's scale, so these real-world thicknesses
+            // must convert too or the outline renders hairline-thin on device.
+            line.widthMultiplier = ScrapSiege.Core.WorldScale.Metres(isLocked ? lockedLineWidth : lineWidth);
         }
 
         private void OnBoundaryChanged(ARPlaneBoundaryChangedEventArgs args) => UpdateOutline();

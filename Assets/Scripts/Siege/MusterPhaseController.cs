@@ -17,12 +17,29 @@ namespace ScrapSiege.Siege
     {
         [SerializeField] private GameObject garrisonUnitPrefab;
         [SerializeField] private int maxGarrisonUnits = 3;
-        [SerializeField] private float navMeshSnapDistance = 0.2f;
+
+        [Tooltip("Supplies the board length that every spawned sentry's reach is scaled against.")]
+        [SerializeField] private ScrapSiege.Core.BoardPlane boardPlane;
+
+        [Tooltip("How far from a chokepoint to look for walkable ground, as a fraction of board " +
+                 "length. The old absolute 0.2m was a third of a 0.60m board, so a sentry could be " +
+                 "placed a long way from the chokepoint it was supposed to be holding.")]
+        [SerializeField] private float navMeshSnapFraction = 0.04f;
+
+        [Tooltip("Used only when no board has been established (the legacy scan/Fortify flow).")]
+        [SerializeField] private float navMeshSnapFallback = 0.05f;
 
         [Tooltip("Degrees of random yaw added to each sentry's facing. Without this every sentry " +
                  "covers the identical bearing, so one walking position flanks all of them at once " +
                  "and the flanking mechanic collapses into a single correct answer.")]
         [SerializeField] private float facingJitterDegrees = 35f;
+
+        /// <summary>
+        /// Overrides the garrison cap for the level about to be played. Authored levels tune how
+        /// many free defenders their layout deserves, which is a per-map balance decision rather
+        /// than a scene-wide constant.
+        /// </summary>
+        public void SetMaxGarrisonUnits(int cap) => maxGarrisonUnits = Mathf.Max(0, cap);
 
         /// <summary>
         /// Spawns the free starting garrison. <paramref name="threatOrigin"/> is where the player's
@@ -38,6 +55,10 @@ namespace ScrapSiege.Siege
             }
 
             int spawned = 0;
+            float boardLength = boardPlane != null ? boardPlane.Length : 0f;
+            float snapDistance = boardLength > 0f
+                ? navMeshSnapFraction * boardLength
+                : ScrapSiege.Core.WorldScale.Metres(navMeshSnapFallback);
 
             foreach (var obj in terrainObjects)
             {
@@ -47,10 +68,19 @@ namespace ScrapSiege.Siege
                     || obj.Archetype == TerrainArchetype.Watchtower;
                 if (!isChokepoint) continue;
 
-                if (!NavMesh.SamplePosition(obj.Center, out NavMeshHit hit, navMeshSnapDistance, NavMesh.AllAreas))
+                if (!NavMesh.SamplePosition(obj.Center, out NavMeshHit hit, snapDistance, NavMesh.AllAreas))
                     continue;
 
-                Instantiate(garrisonUnitPrefab, hit.position, FacingToward(hit.position, threatOrigin));
+                var sentryObject = Instantiate(garrisonUnitPrefab, hit.position, FacingToward(hit.position, threatOrigin));
+
+                // Between Awake and Start, which is why SentryArcVisualizer draws its fan in Start -
+                // otherwise the wedge would advertise the unscaled fallback range.
+                if (boardLength > 0f)
+                {
+                    var sentry = sentryObject.GetComponent<GarrisonSentry>();
+                    if (sentry != null) sentry.ConfigureForBoard(boardLength);
+                }
+
                 spawned++;
             }
         }

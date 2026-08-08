@@ -25,6 +25,7 @@ namespace ScrapSiege.UI
         {
             Scan,
             Fortify,
+            Placement,
             Siege
         }
 
@@ -36,6 +37,8 @@ namespace ScrapSiege.UI
         [SerializeField] private UnitDeploymentController deployment;
         [SerializeField] private VantageController vantage;
         [SerializeField] private RallyController rally;
+        [SerializeField] private ScrapSiege.Levels.BoardPlacementController placement;
+        [SerializeField] private ScrapSiege.Levels.LevelMatchController levelMatch;
 
         [Header("Top bar")]
         [SerializeField] private TMP_Text phaseLabel;
@@ -45,7 +48,12 @@ namespace ScrapSiege.UI
         [Header("Phase panels (bottom bar)")]
         [SerializeField] private CanvasGroup scanPanel;
         [SerializeField] private CanvasGroup fortifyPanel;
+        [SerializeField] private CanvasGroup placementPanel;
         [SerializeField] private CanvasGroup siegePanel;
+
+        [Header("Placement phase")]
+        [SerializeField] private Button confirmBoardButton;
+        [SerializeField] private TMP_Text levelNameLabel;
 
         [Header("Scan phase")]
         [SerializeField] private Button lockPlaneButton;
@@ -123,6 +131,18 @@ namespace ScrapSiege.UI
                 rally.OnArmedChanged.AddListener(HandleRallyArmedChanged);
                 rally.OnRallyIssued.AddListener(HandleRallyIssued);
             }
+
+            if (placement != null)
+            {
+                placement.OnPlacementStarted.AddListener(HandlePlacementStarted);
+                placement.OnBoardPlacedChanged.AddListener(HandleBoardPlacedChanged);
+            }
+
+            if (levelMatch != null)
+            {
+                levelMatch.OnLevelLoaded.AddListener(HandleLevelLoaded);
+                levelMatch.OnSiegeStarted.AddListener(HandleSiegeStarted);
+            }
         }
 
         private void OnDisable()
@@ -158,6 +178,18 @@ namespace ScrapSiege.UI
                 rally.OnArmedChanged.RemoveListener(HandleRallyArmedChanged);
                 rally.OnRallyIssued.RemoveListener(HandleRallyIssued);
             }
+
+            if (placement != null)
+            {
+                placement.OnPlacementStarted.RemoveListener(HandlePlacementStarted);
+                placement.OnBoardPlacedChanged.RemoveListener(HandleBoardPlacedChanged);
+            }
+
+            if (levelMatch != null)
+            {
+                levelMatch.OnLevelLoaded.RemoveListener(HandleLevelLoaded);
+                levelMatch.OnSiegeStarted.RemoveListener(HandleSiegeStarted);
+            }
         }
 
         private void Start()
@@ -184,6 +216,7 @@ namespace ScrapSiege.UI
         {
             Fade(scanPanel, phase == Phase.Scan);
             Fade(fortifyPanel, phase == Phase.Fortify);
+            Fade(placementPanel, phase == Phase.Placement);
             Fade(siegePanel, phase == Phase.Siege);
             Fade(resourceChip, phase == Phase.Siege);
         }
@@ -217,6 +250,13 @@ namespace ScrapSiege.UI
 
         private void HandlePlaneLocked()
         {
+            // With the authored-level flow active, BoardPlacementController.OnEnable has ALREADY
+            // moved the HUD to the Placement phase - PlaneLockController enables placement and only
+            // then raises OnPlaneLocked. Setting Fortify here would clobber that, showing the player
+            // a dead "tap the corners of an object" panel while FortifyInputController is (correctly)
+            // disabled and eating none of their taps. Only the legacy scan flow should land here.
+            if (placement != null) return;
+
             SetPhase(Phase.Fortify);
             SetPrompt("Tap one corner of a real object.");
         }
@@ -266,6 +306,40 @@ namespace ScrapSiege.UI
         public void ToggleDeleteMode()
         {
             if (fortify != null) fortify.ToggleDeleteMode();
+        }
+
+        // --- Placement phase --------------------------------------------------------------
+
+        private void HandlePlacementStarted()
+        {
+            SetPhase(Phase.Placement);
+            SetPrompt("Tap the table to drop the board.");
+            HandleBoardPlacedChanged(false);
+        }
+
+        /// <summary>
+        /// Confirm stays disabled until a board actually exists, so the player can't skip straight
+        /// past placement into a siege with no battlefield.
+        /// </summary>
+        private void HandleBoardPlacedChanged(bool placed)
+        {
+            if (confirmBoardButton != null) confirmBoardButton.interactable = placed;
+
+            if (phase == Phase.Placement)
+                SetPrompt(placed
+                    ? "Drag to move · pinch to resize · twist to turn."
+                    : "Tap the table to drop the board.");
+        }
+
+        private void HandleLevelLoaded(string levelName)
+        {
+            if (levelNameLabel != null) levelNameLabel.text = levelName;
+        }
+
+        /// <summary>Wire to the Confirm button on the placement panel.</summary>
+        public void ConfirmBoard()
+        {
+            if (placement != null) placement.ConfirmPlacement();
         }
 
         // --- Siege phase ------------------------------------------------------------------
@@ -391,6 +465,10 @@ namespace ScrapSiege.UI
                     phaseLabel.text = "STEP 2 · FORTIFY";
                     phaseLabel.color = UITheme.Accent;
                     break;
+                case Phase.Placement:
+                    phaseLabel.text = "STEP 2 · PLACE THE BOARD";
+                    phaseLabel.color = UITheme.Accent;
+                    break;
                 case Phase.Siege:
                     phaseLabel.text = "STEP 3 · SIEGE";
                     phaseLabel.color = UITheme.Danger;
@@ -422,6 +500,7 @@ namespace ScrapSiege.UI
         {
             SnapPanel(scanPanel, phase == Phase.Scan);
             SnapPanel(fortifyPanel, phase == Phase.Fortify);
+            SnapPanel(placementPanel, phase == Phase.Placement);
             SnapPanel(siegePanel, phase == Phase.Siege);
             SnapPanel(resourceChip, phase == Phase.Siege);
         }

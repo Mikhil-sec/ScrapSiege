@@ -112,7 +112,11 @@ namespace ScrapSiege.Vision
             CleanUpOrphanedGhosts();
         }
 
-        private bool HasClearLine(Vector3 eye, Vector3 point) => HasClearLine(eye, point, occluderMask, nearClip);
+        // nearClip and ghostSize are authored in REAL metres; the raycasts and the ghost both live in
+        // the scaled AR world, so they convert. An unconverted nearClip would be a fifth of its
+        // intended reach and stop protecting against the player's own held position clipping a wall.
+        private bool HasClearLine(Vector3 eye, Vector3 point)
+            => HasClearLine(eye, point, occluderMask, WorldScale.Metres(nearClip));
 
         /// <summary>
         /// True if nothing on the occluder layer sits between the eye and this point. Uses a
@@ -199,7 +203,7 @@ namespace ScrapSiege.Vision
             var collider = ghost.GetComponent<Collider>();
             if (collider != null) Destroy(collider);
 
-            ghost.transform.localScale = Vector3.one * ghostSize;
+            ghost.transform.localScale = Vector3.one * WorldScale.Metres(ghostSize);
 
             var renderer = ghost.GetComponent<Renderer>();
             var material = new Material(ghostBaseMaterial) { color = ghostColor };
