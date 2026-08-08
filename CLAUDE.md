@@ -145,14 +145,50 @@ Current settings, validated clean (0 issues): `agentRadius 0.05` (floor), `agent
 The user tested on device, accepted the build, and committed. Their test raised four things that are **design gaps, not bugs**, and were deliberately left alone. Read this before touching levels, cover or balance.
 
 1. **The Narrows does not enforce its "one safe corridor" premise.** Units legitimately reach the enemy base down *both* sides of the wall. Measured on a 0.60 m board (half-width 16.5 cm, both bases centred at x = 0): the wall spine sits at x −4.8…−1.8 cm, so the left lane is 11.7 cm wide and the right lane 18.3 cm — both enormous next to a ~1 cm agent radius. Cover lanes (laid only by `RubbleCover` and `WallBarricade`) blanket everything from the left edge to x = +3.2 cm, and the single sentry — on the spire at x ≈ −5.6 cm, `detectionRadius = 0.20 × boardLength` = 12 cm — reaches only to x = +6.4 cm. **So the left route is immune (it is all cover lane) and the right route is mostly out of range.** The user's own suggestion is arguably the better level: two walls forming a *central* corridor with sentries outside it.
-2. **`SiegeUnit.prefab` has `health = 10`; the C# default is `2`.** A leftover buff from early testing, so units survive 5 s of uncovered exposure instead of 1 s (sentry does 1 dmg / 0.5 s). **Reset to 2 before judging any balance.** Another instance of the "code default changed, serialized value didn't follow" trap — check the prefab, not the source.
-3. **`coverLaneMargin` is still a fixed 5 cm real per side**, so on a 33 cm-wide board one thin wall lays a lane ~39% of the board's width. Everything else in the project is a fraction of `BoardPlane.Length`; this should be too. **Probably the single highest-value change for making precision/vantage matter.**
+2. **~~`SiegeUnit.prefab` has `health = 10`~~ — RESOLVED 2026-08-08, now `3`.** Not reverted to the old default of 2 but *derived*: 1 damage per 0.5 s tick against 3 HP is a 1.5 s fight, matching Mechanic 6's 1–2 s of readable combat. Re-derive it if tick rate or damage changes. (Still a good example of the "code default changed, serialized value didn't follow" trap — check the prefab, not the source.)
+3. **`coverLaneMargin` is still a fixed 5 cm real per side**, so on a 33 cm-wide board one thin wall lays a lane ~39% of the board's width. Everything else in the project is a fraction of `BoardPlane.Length`; this should be too. Was flagged as the highest-value tuning change — **now deliberately deferred with the sentry overhaul**, see "Deferred on purpose" above.
+5. **"Units walk through rubble" is not a bug** — `BlocksMovement` exempts `RubbleCover` on purpose, and that exemption is what un-severed all three maps (the rubble line + wall spine left a 5 mm gap that erosion sealed). It was an **art** problem: the model read as solid, so passing through looked wrong. **Remodelled 2026-08-08** into low scattered debris with visible gaps (max height 0.26 of the unit cube, was 1.0). **Never re-add the carve.**
+6. **~~"Units walk through the watchtower" IS a bug~~ — RULED OUT 2026-08-08 by measurement.** A Play-mode probe reproduced the spawner's obstacle exactly and found the carve correct in all three configurations: before bake, after bake, and reparented under a rotated 3×-scaled `BoardRoot`. `centreWalkable=False` every time. The bake-order hypothesis was wrong. Almost certainly the piece actually being walked through was the rubble above. See `plan.md` Section 10 for the full table and the two remaining lesser candidates if it recurs.
 4. **Unit size is not board-relative** — units stay 5.2 cm at any board size, so on a pinched-out 1.2 m board they are half their proper relative size. Only bites at non-default board sizes.
 
 **Answered, no action needed:** the sentry *is* the red-tinted Blender trooper (`UnitTeamTint`), not the old sphere — `GarrisonUnit.prefab` still carries a legacy root `MeshFilter`/`MeshRenderer` with the Sphere mesh but **the renderer is disabled** (a vestigial `SphereCollider` also remains; both are harmless). Sentries deliberately have no `UnitAnimator`. The covered wedge was drawing at ~4% of its real range until fixed on 2026-08-08 — **that fix has not yet been visually confirmed on device**, so look for it next test.
 
+## Current state (2026-08-08, end of session 3) — AI commander SHIPPED
+
+Scope agreed with the user: **full mutual siege**. The AI deploys real attacking units and the player
+can lose. `plan.md` Section 9 has the ordered task list; Section 5 the AI design; Mechanic 6 the combat.
+
+**All three passes are done and device-tested.** The user tested and accepted the build; the only
+defect was level 4's card briefing overflowing its background (mine — 175 chars against a ~110 budget),
+now fixed at 94.
+
+- **Pass A** — `Team` enum, frontage-limited combat, `UnitDeathEffect`, `SentryFireVisualizer`, health 10 → 3, Lose condition.
+- **Pass B** — `AICommander` (Push/Intercept/Hold) + `AICommanderProfile` + level 04 "The Gauntlet" + `EnemySiegeUnit.prefab`, gated by `LevelDefinition.hasAICommander`.
+- **Pass C** — rubble remodelled; watchtower carve **ruled out** by measurement.
+
+**Next up:** sound, AI tuning + a second difficulty tier, star ratings, and — highest risk — the real
+on-device RevenueCat purchase, which is a hard submission requirement still unmet.
+
+**Authoring constraint learned the hard way:** level card briefings must stay under **~110 characters**.
+The card is fixed-height and the four shipped levels sit at 94–106.
+
+### The one design rule to not break here
+
+**Combat is frontage-limited: one enemy may engage a unit, never several.** A unit with no *unengaged*
+enemy nearby walks past and keeps going for the base. This is deliberate and load-bearing — dogpiling
+makes losses scale by Lanchester's square law, so the bigger stack always wins and "always deploy max
+units" becomes strictly correct, which kills positioning, vantage and cover in one move. Numbers are
+meant to buy **breakthrough**, not annihilation. Cover damage reduction and a winner-recovery delay are
+the secondary dampers. If combat ever starts feeling like an arithmetic race, check this rule first.
+
+### Deferred on purpose — do not pick these up
+
+The sentry system is being overhauled later, so everything that was **sentry-balance** work is deferred
+*together*: the `coverLaneMargin` board-relative fix, re-authoring The Narrows, and two-origin garrison
+bucketing in `MusterPhaseController`. **The three shipped levels are not to be touched.** Also skipped by
+decision: a dedicated tip *screen* — `LevelDefinition.briefing` is already rendered on the level-select
+card by `MainMenuController.PopulateCard`, so authoring the string is the whole job.
+
 ### Still not built
 
-The **AI commander** (the single biggest gap — Rally and the whole "react to a threat" layer are inert without it), player-base Lose condition, star ratings, sound, board elevation, and submission assets.
-
-See `plan.md` Section 9 for the ordered task list.
+Star ratings, sound, board elevation, and submission assets.

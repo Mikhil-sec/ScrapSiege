@@ -2,12 +2,14 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 using ScrapSiege.Core;
+using ScrapSiege.Terrain;
 
 namespace ScrapSiege.Siege
 {
     /// <summary>
     /// Drives a NavMeshAgent toward a deployed destination and damages the base on arrival.
-    /// Also has its own health so GarrisonSentry can chip it down before it gets there.
+    /// Also has its own health so GarrisonSentry can chip it down before it gets there, and - since
+    /// the AI commander landed - fights enemy units it meets on the way.
     /// </summary>
     [RequireComponent(typeof(NavMeshAgent))]
     public class SiegeUnit : MonoBehaviour
@@ -16,7 +18,11 @@ namespace ScrapSiege.Siege
         // unit is ever created without a board, so they are converted rather than left raw.
         [SerializeField] private float arrivalDistance = 0.15f;
         [SerializeField] private int damageToBase = 1;
-        [SerializeField] private int health = 2;
+
+        [Tooltip("Derived, not guessed: at 1 damage per 0.5s tick, 3 HP is a 1.5s fight, which is the " +
+                 "1-2 seconds of readable combat plan.md Mechanic 6 is specced for. Re-derive this if " +
+                 "the tick rate or damage changes.")]
+        [SerializeField] private int health = 3;
 
         [Header("Movement variety - avoids every unit looking identical")]
         [SerializeField] private float rotationSpeed = 8f;
@@ -40,13 +46,36 @@ namespace ScrapSiege.Siege
 
         [SerializeField] private float arrivalJitterFraction = 0.035f;
 
+        [Header("Combat (plan.md Mechanic 6 - frontage-limited)")]
+        [Tooltip("How close an enemy must be to start a duel, as a fraction of board length.")]
+        [SerializeField] private float engagementRadiusFraction = 0.06f;
+
+        [Tooltip("Seconds between attack ticks. Paired with health to set the fight length.")]
+        [SerializeField] private float attackTickSeconds = 0.5f;
+
+        [SerializeField] private int attackDamage = 1;
+
+        [Tooltip("Damage multiplier while standing in a CoverLane. Below 1 means three units in cover " +
+                 "beat five in the open - which is what keeps positioning (and therefore Mechanic 4) " +
+                 "worth more than raw numbers.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float coverDamageMultiplier = 0.5f;
+
+        [Tooltip("After winning a duel a unit cannot start another for this long. Stops a survivor " +
+                 "chain-killing its way down a queue of arriving enemies, and opens a window where " +
+                 "trading a cheap screening unit is genuinely worth it.")]
+        [SerializeField] private float winnerRecoverySeconds = 0.8f;
+
+        [SerializeField] private float navMeshSampleFraction = 0.02f;
+
         private static readonly List<SiegeUnit> active = new List<SiegeUnit>();
 
-        /// <summary>All currently-deployed units - lets GarrisonSentry find nearby targets without needing colliders on the unit prefab.</summary>
+        /// <summary>All currently-deployed units, BOTH teams - filter by <see cref="Team"/> before acting on them.</summary>
         public static IReadOnlyList<SiegeUnit> Active => active;
 
         private NavMeshAgent agent;
         private BaseHealth targetBase;
+        private UnitAnimator animator;
 
         // Where this unit is ultimately headed. Kept separate from agent.destination because a
         // Rally order temporarily overrides the destination with a waypoint, and the unit has to
@@ -54,18 +83,48 @@ namespace ScrapSiege.Siege
         private Vector3 finalDestination;
         private bool hasRallyWaypoint;
         private bool speedVarianceApplied;
+        private bool hasTarget;
+
+        // Health is tracked as a float so the cover multiplier can be a genuine fraction. Authoring
+        // stays an int (an Inspector "3 hit points" is readable; "3.0" invites false precision), but
+        // halving integer damage would floor to zero and make cover total immunity by accident.
+        private float currentHealth;
+        private bool dying;
+
+        private float engagementRadius;
+        private float navMeshSampleDistance;
+        private float attackTimer;
+        private float recoveryRemaining;
+        private SiegeUnit duelOpponent;
 
         public NavMeshAgent Agent => agent;
+
+        /// <summary>Which side this unit fights for. Set by whoever spawns it, before SetTarget.</summary>
+        public Team Team { get; private set; } = Team.Player;
 
         /// <summary>True while diverting to a rally waypoint rather than heading for the base.</summary>
         public bool IsRallying => hasRallyWaypoint;
 
+        /// <summary>
+        /// True while locked in a duel. This is the frontage cap: a unit already fighting cannot be
+        /// picked as anyone else's target, so damage never concentrates.
+        /// </summary>
+        public bool IsEngaged => duelOpponent != null;
+
+        /// <summary>False once the unit has started dying, so nothing targets or damages a corpse.</summary>
+        public bool IsAlive => !dying;
+
         private void Awake()
         {
             agent = GetComponent<NavMeshAgent>();
+            animator = GetComponent<UnitAnimator>();
 
             arrivalDistance = WorldScale.Metres(arrivalDistance);
             arrivalJitterRadius = WorldScale.Metres(arrivalJitterRadius);
+            engagementRadius = WorldScale.Metres(0.04f);
+            navMeshSampleDistance = WorldScale.Metres(0.02f);
+
+            currentHealth = health;
 
             // The prefab is authored at true real-world size - a 5.2cm trooper with a ~1.4cm agent
             // radius. The AR world is scaled up by WorldScale.Scale, so both the visual and the
@@ -84,7 +143,23 @@ namespace ScrapSiege.Siege
 
         private void OnEnable() => active.Add(this);
 
-        private void OnDisable() => active.Remove(this);
+        private void OnDisable()
+        {
+            active.Remove(this);
+
+            // Never leave an opponent locked to a unit that no longer exists - it would be unable to
+            // ever engage anything again and would stand there permanently stopped.
+            ReleaseDuel();
+        }
+
+        /// <summary>
+        /// Assigns this unit's side. Call before <see cref="SetTarget"/>.
+        ///
+        /// Team.Player is the default so the pre-existing deploy path keeps working untouched if it
+        /// ever forgets to call this - a unit that silently defects to the enemy would be a
+        /// spectacularly confusing bug.
+        /// </summary>
+        public void SetTeam(Team team) => Team = team;
 
         /// <summary>
         /// Rescales this unit's movement to the board it is fighting on. Call before
@@ -102,6 +177,8 @@ namespace ScrapSiege.Siege
 
             arrivalDistance = arrivalDistanceFraction * boardLength;
             arrivalJitterRadius = arrivalJitterFraction * boardLength;
+            engagementRadius = engagementRadiusFraction * boardLength;
+            navMeshSampleDistance = navMeshSampleFraction * boardLength;
 
             if (agent == null) return;
 
@@ -115,6 +192,7 @@ namespace ScrapSiege.Siege
         public void SetTarget(Vector3 position, BaseHealth targetBaseHealth)
         {
             targetBase = targetBaseHealth;
+            hasTarget = true;
 
             // Guarded so a second SetTarget call can't compound the multiplier into a unit that
             // sprints across the whole table.
@@ -162,16 +240,210 @@ namespace ScrapSiege.Siege
             return position;
         }
 
-        public void TakeDamage(int amount)
+        /// <summary>
+        /// Applies damage. <paramref name="applyCover"/> is false for GarrisonSentry, which handles
+        /// cover by skipping covered units outright (its own long-standing rule, left alone while the
+        /// sentry system awaits its overhaul), and true for unit-vs-unit damage, where cover is a
+        /// reduction rather than immunity.
+        /// </summary>
+        public void TakeDamage(int amount, bool applyCover = false)
         {
-            health -= amount;
-            if (health <= 0)
-                Destroy(gameObject);
+            if (dying) return;
+
+            float scaled = amount;
+            if (applyCover && IsInCoverLane()) scaled *= coverDamageMultiplier;
+
+            currentHealth -= scaled;
+            if (currentHealth <= 0f) Die();
+        }
+
+        private void Die()
+        {
+            if (dying) return;
+            dying = true;
+
+            // Free the opponent before the effect plays, so the survivor starts recovering (and can
+            // resume walking) on the same frame rather than standing over a corpse.
+            //
+            // The survivor needs its OWN ReleaseDuel call, not just the back-reference clear: agents
+            // are halted via agent.isStopped when a duel begins, and clearing the reference alone
+            // leaves the winner permanently frozen - it would never re-enter the engaged branch that
+            // resumes it, so it would stand still for the rest of the match.
+            SiegeUnit opponent = duelOpponent;
+            ReleaseDuel();
+            if (opponent != null)
+            {
+                opponent.ReleaseDuel();
+                opponent.BeginRecovery();
+            }
+
+            UnitDeathEffect.Play(gameObject, transform.position.y);
+            Destroy(gameObject);
+        }
+
+        private void BeginRecovery() => recoveryRemaining = winnerRecoverySeconds;
+
+        private bool IsInCoverLane()
+        {
+            if (!NavMesh.SamplePosition(transform.position, out NavMeshHit hit, navMeshSampleDistance, NavMesh.AllAreas))
+                return false;
+
+            return (hit.mask & NavMeshAreas.CoverAreaMask) != 0;
         }
 
         private void Update()
         {
+            if (dying) return;
+
+            if (recoveryRemaining > 0f)
+                recoveryRemaining = Mathf.Max(0f, recoveryRemaining - Time.deltaTime);
+
+            UpdateCombat();
+
+            // A unit locked in a duel has stopped moving and is not advancing on anything - skip the
+            // navigation and arrival logic entirely rather than letting a stopped agent's zeroed
+            // remainingDistance be misread.
+            if (IsEngaged) return;
+
             FaceMovementDirection();
+            UpdateNavigation();
+        }
+
+        /// <summary>
+        /// The frontage rule (plan.md Mechanic 6).
+        ///
+        /// A unit fights at most one enemy, and looks only for enemies that are not already fighting
+        /// someone. If every enemy in reach is busy, it finds nothing and simply walks on - which is
+        /// the whole point: a numerical advantage turns into units flowing PAST the fight toward the
+        /// objective, not into several units beating on one. Dogpiling would make losses scale by
+        /// Lanchester's square law, so the larger force would always win and "deploy the maximum
+        /// number of units" would be strictly correct, which flattens positioning, vantage and cover
+        /// into irrelevance.
+        /// </summary>
+        private void UpdateCombat()
+        {
+            if (IsEngaged)
+            {
+                if (!IsDuelStillValid())
+                {
+                    ReleaseDuel();
+                    return;
+                }
+
+                FightTick();
+                return;
+            }
+
+            // Recovery blocks STARTING a fight, never defending one. A unit that has just won is
+            // briefly vulnerable rather than briefly invincible.
+            if (recoveryRemaining > 0f) return;
+
+            SiegeUnit target = FindUnengagedEnemy();
+            if (target != null) BeginDuel(target);
+        }
+
+        private bool IsDuelStillValid()
+        {
+            if (duelOpponent == null || !duelOpponent.IsAlive) return false;
+
+            // Generous exit range so two units that drift slightly apart mid-fight (agent avoidance
+            // nudges them) don't flicker in and out of the duel.
+            float exitRadius = engagementRadius * 1.6f;
+            return (duelOpponent.transform.position - transform.position).sqrMagnitude
+                   <= exitRadius * exitRadius;
+        }
+
+        private SiegeUnit FindUnengagedEnemy()
+        {
+            SiegeUnit nearest = null;
+            float nearestSqr = engagementRadius * engagementRadius;
+
+            foreach (var other in active)
+            {
+                if (other == null || other == this) continue;
+                if (!other.IsAlive) continue;
+                if (other.Team == Team) continue;
+
+                // The frontage cap itself: an enemy already in a duel is not a candidate.
+                if (other.IsEngaged) continue;
+
+                float sqr = (other.transform.position - transform.position).sqrMagnitude;
+                if (sqr > nearestSqr) continue;
+
+                nearestSqr = sqr;
+                nearest = other;
+            }
+
+            return nearest;
+        }
+
+        /// <summary>Locks both units into the duel. Symmetric, so neither can be pulled into a second one.</summary>
+        private void BeginDuel(SiegeUnit other)
+        {
+            duelOpponent = other;
+            other.duelOpponent = this;
+
+            StopForCombat();
+            other.StopForCombat();
+
+            // Staggered so two units that meet head-on do not land every blow on the same frame and
+            // annihilate each other simultaneously - a fight should usually leave a survivor.
+            attackTimer = Random.Range(0f, attackTickSeconds * 0.5f);
+            other.attackTimer = Random.Range(0f, attackTickSeconds * 0.5f);
+        }
+
+        private void StopForCombat()
+        {
+            if (agent != null && agent.isOnNavMesh) agent.isStopped = true;
+        }
+
+        private void ReleaseDuel()
+        {
+            if (duelOpponent != null)
+            {
+                // Clear the far side's back-reference only if it still points at us, so releasing a
+                // stale duel cannot detach an opponent from a fight it has since joined.
+                if (duelOpponent.duelOpponent == this) duelOpponent.duelOpponent = null;
+                duelOpponent = null;
+            }
+
+            if (agent != null && agent.isOnNavMesh) agent.isStopped = false;
+        }
+
+        private void FightTick()
+        {
+            FaceOpponent();
+
+            // A unit still recovering from its last kill does not swing yet, which hands the
+            // initiative to whoever caught it.
+            if (recoveryRemaining > 0f) return;
+
+            attackTimer -= Time.deltaTime;
+            if (attackTimer > 0f) return;
+
+            attackTimer = attackTickSeconds;
+
+            if (animator != null) animator.PlayAttack();
+            duelOpponent.TakeDamage(attackDamage, applyCover: true);
+        }
+
+        private void FaceOpponent()
+        {
+            if (duelOpponent == null) return;
+
+            Vector3 toOpponent = duelOpponent.transform.position - transform.position;
+            toOpponent.y = 0f;
+            if (toOpponent.sqrMagnitude < 1e-6f) return;
+
+            Quaternion look = Quaternion.LookRotation(toOpponent.normalized, Vector3.up);
+            transform.rotation = Quaternion.Slerp(transform.rotation, look, Time.deltaTime * rotationSpeed);
+        }
+
+        private void UpdateNavigation()
+        {
+            // Nothing to advance on yet. Without this an AI unit spawned before its target resolves
+            // would run the arrival check against a zeroed destination.
+            if (!hasTarget) return;
 
             if (agent.pathPending) return;
 

@@ -81,7 +81,18 @@ namespace ScrapSiege.UI
         [SerializeField] private TMP_Text rallyLabel;
 
         [Header("Outcome")]
+        [Tooltip("Shown for BOTH outcomes - the heading below is what distinguishes them. One panel " +
+                 "rather than two because they differ by a single line of text and a colour, and a " +
+                 "second near-identical panel is a second thing to keep in sync.")]
         [SerializeField] private GameObject winPanel;
+
+        [Tooltip("Heading inside the outcome panel, retitled per result. Optional: without it the " +
+                 "panel still appears, it just reads the same either way.")]
+        [SerializeField] private TMP_Text outcomeTitle;
+
+        [Tooltip("Sub-line inside the outcome panel. Without it a defeat still reads 'The enemy base " +
+                 "is scrap', which is the exact opposite of what happened.")]
+        [SerializeField] private TMP_Text outcomeBody;
 
         [Header("Motion")]
         [SerializeField] private float panelFadeSpeed = 9f;
@@ -118,7 +129,11 @@ namespace ScrapSiege.UI
             }
 
             if (siege != null) siege.OnSiegeStarted.AddListener(HandleSiegeStarted);
-            if (outcome != null) outcome.OnPlayerWon.AddListener(HandlePlayerWon);
+            if (outcome != null)
+            {
+                outcome.OnPlayerWon.AddListener(HandlePlayerWon);
+                outcome.OnPlayerLost.AddListener(HandlePlayerLost);
+            }
 
             if (vantage != null)
             {
@@ -165,7 +180,11 @@ namespace ScrapSiege.UI
             }
 
             if (siege != null) siege.OnSiegeStarted.RemoveListener(HandleSiegeStarted);
-            if (outcome != null) outcome.OnPlayerWon.RemoveListener(HandlePlayerWon);
+            if (outcome != null)
+            {
+                outcome.OnPlayerWon.RemoveListener(HandlePlayerWon);
+                outcome.OnPlayerLost.RemoveListener(HandlePlayerLost);
+            }
 
             if (vantage != null)
             {
@@ -431,8 +450,31 @@ namespace ScrapSiege.UI
 
         private void HandlePlayerWon()
         {
-            if (winPanel != null) winPanel.SetActive(true);
+            ShowOutcome("VICTORY", UITheme.TextPrimary, "The enemy base is scrap.");
             SetPrompt("Base destroyed.");
+        }
+
+        /// <summary>
+        /// Only reachable on levels with an AI commander - nothing else in the game can damage the
+        /// player's base, which is why this had no counterpart until now.
+        /// </summary>
+        private void HandlePlayerLost()
+        {
+            ShowOutcome("DEFEAT", new Color(0.90f, 0.35f, 0.30f), "Your base has been overrun.");
+            SetPrompt("Your base has fallen.");
+        }
+
+        private void ShowOutcome(string title, Color titleColor, string body)
+        {
+            if (winPanel != null) winPanel.SetActive(true);
+
+            if (outcomeTitle != null)
+            {
+                outcomeTitle.text = title;
+                outcomeTitle.color = titleColor;
+            }
+
+            if (outcomeBody != null) outcomeBody.text = body;
         }
 
         /// <summary>

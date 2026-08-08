@@ -12,6 +12,8 @@ Full game design — mechanics, level format, AI behaviour, monetization, timeli
 
 The full loop is **playable end to end on device and accepted by device testing (2026-08-08)**: main menu → level select → AR scan → lock a plane → place the board (tap, drag, pinch, twist) → confirm → the level builds → siege, with units correctly reaching the enemy base.
 
+**The AI commander landed on 2026-08-08 and the game is now a two-sided fight.** A fourth level, *The Gauntlet*, plays against a rule-based opponent that deploys its own units at your base — so the match can now be lost, not only won.
+
 > **Note on the AR world scale.** Unity hard-clamps NavMesh `agentRadius` to a 0.05 m floor, which is far too coarse for a 33 cm tabletop board — the game runs the AR world at 5x scale (`ScrapSiege.Core.WorldScale`) so that floor costs only 1 cm of real table. This is intentional and load-bearing, not a workaround to remove; see `plan.md` Section 10 before changing any distance value in the codebase.
 
 ### Working today
@@ -19,7 +21,11 @@ The full loop is **playable end to end on device and accepted by device testing 
 - **Main menu + level select** — level cards generated from a `LevelCatalog`, so shipping a new map is a data file and nothing else. Pro-locked levels route to the paywall through the same decoupled entitlement gate gameplay uses.
 - **Scan phase** — AR plane detection (ARCore/AR Foundation), no depth sensor required. Detected surfaces get a boundary outline and the HUD reports their real polygon area. **Lock This Table** commits to one plane and freezes detection so ARCore can't keep growing or drifting it. Scan failures log a diagnostic every 2s so a grey Lock button is explainable rather than mysterious.
 - **Board placement** — tap to drop the board, drag to move, pinch to resize, twist to rotate, then Confirm. A footprint outline shows the real board shape before you commit. Raycasts fall back through plane → estimated plane → feature point, because plane detection is this project's known weak spot.
-- **Authored levels** — `LevelDefinition` ScriptableObjects in normalised board space (0–1 coordinates), so one map projects onto any table at any size. Three ship today; each is built to force one mechanic.
+- **Authored levels** — `LevelDefinition` ScriptableObjects in normalised board space (0–1 coordinates), so one map projects onto any table at any size. Four ship today; each is built to force one mechanic.
+- **AI commander** — rule-based (explicit thresholds and utility scoring, no learned model). Runs a ~1s decision loop over **Push / Intercept / Hold**: bank resources for a wave worth telegraphing, push the least-defended lane, or reinforce the lane you committed to. It earns resources on the same `ResourceEconomy` component you do — difficulty is decision quality and reaction delay, never free income. Enabled per level via `LevelDefinition.hasAICommander`, so the three original maps are untouched.
+- **Unit combat, frontage-limited** — units of opposing sides fight when they meet, but **at most one enemy can engage a unit**. A unit with no *unengaged* enemy nearby walks straight past. Numbers therefore buy **breakthrough**, not slaughter — without this cap, losses scale by Lanchester's square law, the bigger stack always wins, and "always deploy maximum units" would be strictly correct, flattening positioning, vantage and cover into irrelevance. Cover reduces damage taken and a duel winner has a short recovery, so three units in cover beat five in the open.
+- **Readable deaths and readable fire** — a killed unit breaks into its own body parts, which fly, settle on the table and fade over two seconds rather than vanishing. Sentries draw a tracer to the exact unit they are damaging plus a hit flash, driven from the damage tick itself so the visual can't claim a shot that dealt no damage.
+- **Win *and* lose conditions** — both bases are watched, with a single outcome panel retitled per result.
 - **Vantage** — camera height above the board continuously drives deploy precision, with a ring drawn on the table showing your current scatter radius *before* you tap.
 - **Rally** — redirect every deployed unit through a new lane, available only when you're physically pulled back far enough to see the whole board.
 - **True line of sight** — graded (hidden / faint / partial / full) from three raycasts per enemy, with last-known-position ghosts that *drift* along the target's last heading, so stale intel is wrong rather than merely old.
@@ -30,19 +36,21 @@ The full loop is **playable end to end on device and accepted by device testing 
 
 ### Not built yet
 
-- **AI commander** — the biggest gap. Rally and the whole "react to a threat" layer are inert without an opponent.
-- **Player base + Lose condition** — the player base spawns, but nothing damages it yet.
-- Star ratings, sound, board elevation, more levels, demo video and submission assets.
+- **Sound** — no audio at all yet, and it's the most visible remaining gap in a demo video.
+- **Star ratings / per-level results** — `parTimeSeconds` and `parUnitsLost` are authored on every level but nothing reads them.
+- **Sentry system overhaul** — deliberately paused; a cluster of tuning work is deferred with it (see below).
+- Board elevation, more levels, demo video and submission assets.
 
 ### Known limitations
 
-- Only **one generic unit type** — no combat variety yet.
+- **The AI commander is v1 and has had one device test.** Only the "Recruit" difficulty tier exists. Its cadence, unit cap and reaction delay are derived from design intent rather than tuned against real play.
+- Only **one generic unit type** — no combat variety yet. The AI's "unit mix" is currently just a cover-preference roll.
 - **AR plane detection is this project's proven weak point.** See `plan.md` Section 10.
-- **The Narrows doesn't yet enforce its "one safe corridor" premise** — both sides of the wall are currently viable routes, and the cover lane and sentry range don't line up to punish either one. Design gap, not a bug; see `plan.md` Section 10.
-- **`SiegeUnit.health` is set to 10 in the prefab** (leftover from early testing to distinguish real deaths from a since-fixed disappearing-unit bug), well above the code default of 2 — makes units feel unkillable until reset.
-- **`coverLaneMargin` is still an absolute real-world distance**, unlike almost every other gameplay value in the project, which makes cover disproportionately generous on a small board.
-- **RevenueCat purchases don't complete on a real device yet** — the product only exists on the Test Store; real builds go through Google Play Billing, which needs a Play Console product.
+- **Deferred as a group with the sentry overhaul** (all sentry-balance work that the overhaul would invalidate): `coverLaneMargin` is still an absolute real-world distance rather than a fraction of board length, which makes cover disproportionately generous on a small board; and **The Narrows doesn't enforce its "one safe corridor" premise** — both sides of the wall are viable, unpunished routes. Design gaps, not bugs; see `plan.md` Section 10.
+- **Unit size is not board-relative** — units stay ~5cm at any board size, so on a pinched-out large board they're proportionally small.
+- **RevenueCat purchases don't complete on a real device yet** — the product only exists on the Test Store; real builds go through Google Play Billing, which needs a Play Console product. **This is the biggest submission risk.**
 - **Landscape only.** All canvases are authored at 1920×1080; portrait would need re-authoring, not a settings flip.
+- **Level card briefings must stay under ~110 characters.** The card is fixed-height; a 175-character briefing overflowed its background box. The four shipped levels sit at 94–106.
 
 ## Tech stack
 
@@ -68,18 +76,22 @@ Assets/Scripts/                 - ScrapSiege.Runtime.asmdef (named assembly, ref
               TerrainArchetype, TerrainObjectData, NavMeshAreas, TerrainClassifier +
               FortifyInputController (the legacy scanning flow - kept as a fallback, not primary)
   Siege/    - resource economy, unit deployment, UnitAnimator (procedural), RallyController,
-              Muster/garrison, GarrisonSentry + SentryArcVisualizer, BaseHealth, win condition
+              Muster/garrison, GarrisonSentry + SentryArcVisualizer + SentryFireVisualizer,
+              BaseHealth, win/lose conditions, Team, SiegeUnit (movement + frontage-limited
+              combat), UnitDeathEffect, AICommander + AICommanderProfile
   UI/       - HudController (the one place that decides what the HUD shows), MainMenuController,
               UITheme palette, SafeAreaFitter, UIButtonMotion
   Monetization/ - ProEntitlement.cs only: the decoupled Pro-status gate gameplay code reads
 Assets/Monetization/            - deliberately OUTSIDE ScrapSiege.Runtime.asmdef (the RevenueCat
                                   SDK ships with no asmdef). MonetizationManager, PaywallController
-Assets/Levels/                  - the three authored levels + LevelCatalog
-Assets/Models/                  - Blender-exported low-poly FBX (trooper + 4 terrain pieces)
+Assets/Levels/                  - the four authored levels + LevelCatalog + AIProfile_Recruit
+Assets/Models/                  - Blender-exported low-poly FBX (trooper + 5 terrain pieces).
+                                  NOTE: export settings are non-obvious - see plan.md Section 8
 Assets/Editor/BuildScript.cs    - one Android build entry point (menu, MCP, or batchmode)
 Assets/UI/Generated/            - procedurally generated 9-sliced sprites, tinted from UITheme
 Assets/Tests/EditMode/          - TerrainClassifier, VantageMath and VisionMath tests
-Assets/Prefabs/                 - GroundQuad, DummyBase, SiegeUnit, GarrisonUnit, PlaneOutline
+Assets/Prefabs/                 - GroundQuad, DummyBase, SiegeUnit, EnemySiegeUnit, GarrisonUnit,
+                                  PlaneOutline
 Assets/Scenes/MainMenu.unity    - title + level select (no AR; build index 0)
 Assets/Scenes/ARTest.unity      - the AR match scene (build index 1)
 ```

@@ -16,6 +16,7 @@ GameObject:
   - component: {fileID: 4842485151751418025}
   - component: {fileID: 3235784017818378335}
   - component: {fileID: 544875344903967110}
+  - component: {fileID: 3581072297568527834}
   m_Layer: 0
   m_Name: GarrisonUnit
   m_TagString: Untagged
@@ -130,6 +131,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ScrapSiege.Siege.GarrisonSentry
   detectionRadius: 0.2
+  detectionRadiusFraction: 0.2
+  navMeshSampleFraction: 0.02
   facingArcDegrees: 150
   tickInterval: 0.5
   damagePerTick: 1
@@ -180,6 +183,25 @@ MonoBehaviour:
   m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Siege.UnitTeamTint
   baseMaterial: {fileID: 2100000, guid: 78a9eec088419af42bc4b33b55c9ef66, type: 2}
   teamColor: {r: 0.8, g: 0.22, b: 0.2, a: 1}
+--- !u!114 &3581072297568527834
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1385196293441755479}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 935295ba65fe87541a05c7cd23c9fa81, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Siege.SentryFireVisualizer
+  tracerBaseMaterial: {fileID: 2100000, guid: 78a9eec088419af42bc4b33b55c9ef66, type: 2}
+  tracerColor: {r: 1, g: 0.45, b: 0.2, a: 1}
+  tracerSeconds: 0.18
+  widthFraction: 0.004
+  targetHeightFraction: 0.6
+  flashColor: {r: 1, g: 0.85, b: 0.5, a: 1}
+  flashSeconds: 0.15
 --- !u!1001 &4890966956893314791
 PrefabInstance:
   m_ObjectHideFlags: 0

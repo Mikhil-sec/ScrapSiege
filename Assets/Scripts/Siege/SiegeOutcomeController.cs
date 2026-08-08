@@ -4,38 +4,108 @@ using UnityEngine.Events;
 namespace ScrapSiege.Siege
 {
     /// <summary>
-    /// Closes the Siege loop: watches the dummy base's health and, once it's destroyed, stops
-    /// the resource/deploy systems and raises a Win event. This is the "Aftermath" phase from
-    /// plan.md's match structure in placeholder form - no cinematic zoom yet, just a clean stop
-    /// and a UI hook. There is no Lose condition yet because nothing currently damages the
-    /// player back (no real opponent until Week 3 Cloud Anchor sync); add one once something can.
+    /// Closes the Siege loop: watches both bases and, once either is destroyed, stops the
+    /// resource/deploy/AI systems and raises the matching outcome event. This is the "Aftermath"
+    /// phase from plan.md's match structure in placeholder form - no cinematic zoom yet, just a
+    /// clean stop and a UI hook.
+    ///
+    /// <para>The Lose side arrived with the AI commander. It had been deferred for a genuine reason -
+    /// nothing could damage the player back - but that reason expired the moment the AI started
+    /// deploying real attackers, and it was a hard dependency rather than a nice-to-have: without it
+    /// an AI push that reached the player's base would land on nothing and the AI's entire purpose
+    /// would be unobservable. <c>LevelBuilder</c> has been building a real
+    /// <see cref="BaseHealth"/> for the player base the whole time; nothing ever watched it.</para>
     /// </summary>
     public class SiegeOutcomeController : MonoBehaviour
     {
         [SerializeField] private ResourceEconomy resourceEconomy;
         [SerializeField] private UnitDeploymentController deploymentController;
 
-        public UnityEvent OnPlayerWon;
+        [Tooltip("Optional - the high-vantage Rally order. Stopped alongside deployment so no order " +
+                 "can be issued after the match is decided.")]
+        [SerializeField] private RallyController rallyController;
 
-        /// <summary>Wire SiegePhaseController to call this once the dummy base's BaseHealth exists.</summary>
-        public void WatchBase(BaseHealth baseHealth)
+        public UnityEvent OnPlayerWon;
+        public UnityEvent OnPlayerLost;
+
+        private bool decided;
+
+        /// <summary>
+        /// Extra behaviours to switch off when the match ends - the AI commander registers itself
+        /// here. A list rather than a serialized field because the commander is only present on
+        /// levels that opt into it, so an Inspector slot would be null on most levels and the null
+        /// would be indistinguishable from a wiring mistake.
+        /// </summary>
+        private readonly System.Collections.Generic.List<Behaviour> stopOnEnd
+            = new System.Collections.Generic.List<Behaviour>();
+
+        public void RegisterStopOnEnd(Behaviour behaviour)
         {
-            baseHealth.OnBaseDestroyed.AddListener(HandleBaseDestroyed);
+            if (behaviour != null && !stopOnEnd.Contains(behaviour)) stopOnEnd.Add(behaviour);
         }
 
-        private void HandleBaseDestroyed()
+        /// <summary>Wire SiegePhaseController/LevelMatchController to call this with the ENEMY base.</summary>
+        public void WatchBase(BaseHealth baseHealth)
         {
-            // A missing Inspector reference here must never block OnPlayerWon from firing - log
+            if (baseHealth == null)
+            {
+                Debug.LogError("SiegeOutcomeController.WatchBase: enemy base health is null - the win condition can never fire.", this);
+                return;
+            }
+
+            baseHealth.OnBaseDestroyed.AddListener(HandleEnemyBaseDestroyed);
+        }
+
+        /// <summary>Wire with the PLAYER's base, so an AI push that gets through actually ends the match.</summary>
+        public void WatchPlayerBase(BaseHealth baseHealth)
+        {
+            if (baseHealth == null)
+            {
+                Debug.LogError("SiegeOutcomeController.WatchPlayerBase: player base health is null - the lose condition can never fire.", this);
+                return;
+            }
+
+            baseHealth.OnBaseDestroyed.AddListener(HandlePlayerBaseDestroyed);
+        }
+
+        private void HandleEnemyBaseDestroyed()
+        {
+            if (!EndMatch()) return;
+            OnPlayerWon?.Invoke();
+        }
+
+        private void HandlePlayerBaseDestroyed()
+        {
+            if (!EndMatch()) return;
+            OnPlayerLost?.Invoke();
+        }
+
+        /// <summary>
+        /// Stops the match systems. Returns false if the match was already decided, which guards the
+        /// genuine race now that two bases can be destroyed: a player unit and an AI unit can land
+        /// killing blows on the same frame, and without this both panels would be raised at once.
+        /// </summary>
+        private bool EndMatch()
+        {
+            if (decided) return false;
+            decided = true;
+
+            // A missing Inspector reference here must never block the outcome event from firing - log
             // it loudly and keep going instead of a silent no-op or an uncaught exception (this
             // exact gap - resourceEconomy/deploymentController unassigned - swallowed a real win
             // once already).
             if (resourceEconomy != null) resourceEconomy.enabled = false;
-            else Debug.LogError("SiegeOutcomeController: Resource Economy is not assigned - it won't stop ticking after a win.", this);
+            else Debug.LogError("SiegeOutcomeController: Resource Economy is not assigned - it won't stop ticking after the match ends.", this);
 
             if (deploymentController != null) deploymentController.enabled = false;
-            else Debug.LogError("SiegeOutcomeController: Deployment Controller is not assigned - deploys won't stop after a win.", this);
+            else Debug.LogError("SiegeOutcomeController: Deployment Controller is not assigned - deploys won't stop after the match ends.", this);
 
-            OnPlayerWon?.Invoke();
+            if (rallyController != null) rallyController.enabled = false;
+
+            foreach (var behaviour in stopOnEnd)
+                if (behaviour != null) behaviour.enabled = false;
+
+            return true;
         }
     }
 }

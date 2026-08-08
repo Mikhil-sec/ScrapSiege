@@ -52,6 +52,16 @@ namespace ScrapSiege.Levels
         [Tooltip("Chokepoint/Watchtower terrain spawns a free defending sentry, capped here.")]
         public int maxGarrisonUnits = 3;
 
+        [Header("AI commander")]
+        [Tooltip("Whether this level is played against an AI commander that deploys its own units - " +
+                 "and therefore whether the player can LOSE here. Off for the three original levels, " +
+                 "which are authored for a one-directional siege and are balanced around it. Gating " +
+                 "per level is what makes it safe to add the AI without re-tuning everything else.")]
+        public bool hasAICommander;
+
+        [Tooltip("Difficulty tier for this level's commander. Ignored unless Has AI Commander is on.")]
+        public ScrapSiege.Siege.AICommanderProfile aiProfile;
+
         [Header("Star thresholds")]
         [Tooltip("Win within this many seconds for the time star.")]
         public float parTimeSeconds = 120f;

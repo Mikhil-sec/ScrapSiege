@@ -126,6 +126,11 @@ namespace ScrapSiege.Siege
             var unit = Instantiate(unitPrefab, navHit.position, Quaternion.identity);
             var siegeUnit = unit.GetComponent<SiegeUnit>();
 
+            // Explicit even though Team.Player is the default, because this is the one place a unit's
+            // allegiance is decided and leaving it implicit invites the AI's spawn path to be written
+            // the same way by copy-paste.
+            siegeUnit.SetTeam(Team.Player);
+
             NavMeshAreas.ApplyCoverPreference(siegeUnit.Agent, preferCover: pendingMode == DeployMode.Covered);
 
             // Before SetTarget, which multiplies the per-unit speed variance onto the base speed.

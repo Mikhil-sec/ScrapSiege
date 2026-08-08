@@ -84,6 +84,38 @@ Both modes can walk **anywhere**. They differ only in how much they *value* cove
 
 Sentries cover a **150° facing arc**, not a circle, drawn on the table by `SentryArcVisualizer` so the blind side is readable with no UI. `MusterPhaseController` faces them at the player's edge with ±35° jitter — **without the jitter every sentry covers the same bearing and one position flanks them all**, collapsing the mechanic.
 
+### Mechanic 6 — Unit combat, frontage-limited (BUILDING 2026-08-08)
+
+Units of opposing teams fight when they meet. The design problem this solves is that the obvious
+implementation is a **bad** one: if every nearby unit damages the same target, losses scale by
+Lanchester's square law, the bigger stack always wins, and "deploy the maximum number of units" is
+strictly correct. Positioning, vantage and cover all stop mattering — an arithmetic game, not a
+tactical one.
+
+**The fix is to cap frontage, not damage.**
+
+- A unit may be engaged by **at most one** enemy at a time. Duels, never dogpiles.
+- A unit targets the nearest **unengaged** enemy inside its engagement radius. If every enemy nearby
+  is already locked in a duel, it **ignores them and continues to the base**.
+
+So a 5-vs-2 is two duels and *three units walking straight past*. Numbers buy **breakthrough**, not
+annihilation — which is the correct currency for a siege game and keeps the race-to-the-objective
+core intact. Defence becomes "can I plug the frontage", not "do I have more bodies": on a multi-lane
+map two defenders can only cork two lanes, and **Rally is how the player finds the third**. That is
+the first time Rally has had a real reason to exist.
+
+Two secondary dampers stop degenerate cases:
+- **Cover reduces damage taken.** Three units in a CoverLane beat five in the open, so positioning
+  beats numbers. This is also what keeps Mechanic 4 (Direct vs Covered) meaningful.
+- **A duel winner has a brief recovery** before it can re-engage, so a survivor cannot chain-kill
+  its way down a queue of arrivals.
+
+Fights last 1.5–2 s by design — long enough to read as combat, short enough not to stall the advance.
+`UnitAnimator.PlayAttack()` (which already existed, fully written and never called by anything) fires
+per damage tick, so a fight is 3–4 visible lunges. Death plays `UnitDeathEffect` rather than an
+instant `Destroy`, because units silently vanishing was indistinguishable from the disappearing-unit
+bug this project spent a session chasing.
+
 ### Terrain archetypes
 
 | Archetype | Role | Blocks sight? | Blocks movement? |
@@ -98,16 +130,33 @@ Sight and movement are **independent** — see `TerrainObjectSpawner.BlocksLineO
 
 > **Fixed 2026-08-08:** every archetype used to carve a `NavMeshObstacle` unconditionally, including Rubble — so the "safe corridor" a unit is meant to route *through* was solid. On The Narrows the rubble line plus the wall spine left a **5 mm** gap on a 33 cm-wide board, which the bake's agent-radius erosion then sealed completely, severing the map.
 
-## 5. The AI Commander (NOT YET BUILT — the biggest gap)
+## 5. The AI Commander (BUILDING 2026-08-08 — the biggest gap)
 
 Rule-based, explicit thresholds and utility scoring, no learned model.
 
 - **Symmetric economy** — the AI ticks resources on the same schedule; difficulty comes from decision quality, not cheating.
-- **Behaviour loop** (~1s tick): score candidate actions — reinforce a threatened lane, push the weakest-defended approach, hold for a bigger wave — take the best.
+- **Behaviour loop** (~1s tick): score candidate actions and take the best.
 - **Difficulty tiers:** resource rate, reaction delay, willingness to commit, unit mix.
 - **Readability matters.** Telegraphing a push beats optimal play. This is a demo-video game as much as a strategy game.
 
-Its units should get `VisionTarget` so line of sight applies to them.
+Its units get `VisionTarget` so line of sight applies to them (the player's own unit prefab
+deliberately does not have one — you always see your own army).
+
+**Scope decided 2026-08-08: full mutual siege.** The AI deploys real attacking units at the player's
+base, so the player can lose. This pulled the Lose condition forward as a hard dependency —
+`LevelBuilder` already builds `PlayerBase`/`PlayerBaseHealth` and nothing ever watched it, so an AI
+push had nothing to land on.
+
+**Action set: Push / Intercept / Hold.** The original plan said "reinforce a threatened lane", which
+assumed spawning extra sentries. **Intercept replaces Reinforce** — deploy toward a blocking position
+against the player's strongest advance rather than at their base. It needs no sentry work and it is
+the better behaviour anyway, because it directly creates the frontage contest Mechanic 6 is built
+around. **Hold** banks resources toward `holdBankTarget` so pushes arrive as readable waves instead
+of a one-unit trickle.
+
+**Gated per level by `LevelDefinition.hasAICommander`.** The three shipped levels are authored for a
+one-directional siege and stay exactly as they are; only the new AI level runs a commander. This is
+what makes it safe to build the AI without first re-balancing everything else.
 
 ## 6. Levels
 
@@ -146,21 +195,106 @@ Hand-authored `LevelDefinition` ScriptableObjects in **normalised board space** 
 
 **Lesson:** always render the **near-overhead** view before accepting a unit model. The first trooper looked fine from the front and read as an ambiguous blob from the actual gameplay angle; fixed with a bright forward-pointing crest.
 
+### ⚠️ Blender FBX export settings — non-obvious and easy to get wrong
+
+Every terrain model must import as **`size = 1.0`, `min.y = 0`, root rotation X = 0**. Check any new
+export against an untouched model (`Terrain_Wall`) rather than against expectation. The settings that
+produce it:
+
+```python
+bpy.ops.export_scene.fbx(
+    filepath=path, use_selection=True,
+    apply_unit_scale=False,            # True lands the model 100x too small
+    apply_scale_options='FBX_SCALE_NONE',
+    global_scale=1.0,
+    bake_space_transform=True,         # folds Z-up -> Y-up into the vertices, root rotation stays 0
+    object_types={'MESH'}, mesh_smooth_type='FACE',
+    axis_forward='-Z', axis_up='Y', add_leaf_bones=False)
+```
+
+**Blender's default FBX settings are wrong for this project** and produce a model 100x too small
+carrying a −90° X root rotation. That is survivable-looking (it still renders) but the spawner maps
+`localScale` straight to metres from a unit cube, so the visual ends up a speck inside a correctly
+sized collider and NavMesh obstacle. Confirmed by measurement on 2026-08-08 during the rubble
+remodel; `bake_space_transform=True` is the setting that actually matters.
+
+**Rubble was remodelled 2026-08-08** for exactly the readability reason in Section 10: it was a dense
+mound with an upright slab reaching the full unit-cube height on a solid base plate, so it read as a
+hard barrier and walking through it looked like a bug. Now 18 low scattered chunks, max height
+**0.26** of the unit cube, with visible floor between them and the solid base plate broken into
+fragments. 144 verts, down from 696. The four material slots (`SS_Plate/SS_Accent/SS_Body/SS_Metal`)
+are preserved in order, because `MaterialSlots.RoleForSlot` reads them by name.
+
 ## 9. Remaining work, in order
 
 **Playable end-to-end and accepted by the user's own device test on 2026-08-08** (post world-scale fix). That test raised design gaps that are deliberately NOT fixed yet — see the callout below before touching levels, cover or balance.
 
-1. **AI commander v1** — the biggest gap. Rally, "react to a threat", and difficulty tuning are all inert without it.
-2. **Design tuning from the 2026-08-08 device test** (small, high-value, do before or alongside the AI commander):
-   - Revert `SiegeUnit.prefab.health` from 10 back to 2 — a leftover test buff that makes units feel unkillable.
-   - Make `coverLaneMargin` a fraction of `BoardPlane.Length` instead of a fixed real-world distance — likely the single biggest lever for making precision/vantage actually matter.
-   - Re-author The Narrows so the wall forms a genuinely central corridor with sentry coverage on both flanks, instead of the current layout where both sides are viable, unpunished routes. Best done once the AI commander exists, since a reactive defender changes what "corridor" means.
-3. **Player base + Lose condition** — the player base spawns already; nothing damages it yet.
-4. **Level select polish** — star ratings, per-level results.
-5. **Board elevation** (stretch) — a raised plateau making line of sight genuinely 3D. **Trigger: only after flat maps are confirmed solid on device AND the AI exists**, because NavMesh at tabletop scale has bitten this project twice and a NavMesh bug would otherwise be indistinguishable from an AI bug.
-6. **Polish** — sound, VFX, HUD pass.
-7. **Monetization finish** — Play Console product, Internal Testing, real on-device purchase.
-8. **Ship** — demo video, icon, screenshots, repo cleanup.
+### ✅ Passes A–C COMPLETE and device-tested 2026-08-08
+
+The user tested the build and accepted it — "everything looks good" — with one defect found and fixed:
+**level 4's briefing overflowed its card background.** Cause was mine: 175 characters where the other
+three levels sit at 97–106 and the card is fixed-height. Shortened to 94. **Level card briefings have
+a ~110 character budget** — treat it as a hard constraint when authoring new levels.
+
+### The plan as agreed, 2026-08-08 (session 3) — three passes
+
+**Pass A — Combat foundation ✅ DONE.** Unit-vs-unit combat is no longer polish; with the AI deploying
+real attackers it is the primary source of stakes, so it came first.
+1. `Team { Player, Enemy }` on `SiegeUnit`. `GarrisonSentry` and `RallyController` both filter by it —
+   they operate on the shared static `SiegeUnit.Active` list, so **without this Rally would redirect
+   the AI's own attackers** and sentries would shoot their own side.
+2. Frontage-limited engagement (Mechanic 6) with cover damage reduction and winner recovery.
+3. `UnitDeathEffect` — the unit's own 12 parts detach, fall and fade over ~2 s. **Not Rigidbodies:**
+   at `WorldScale.Scale = 5` Unity's 9.81 gravity reads as 1.96 real m/s², i.e. moon gravity, so
+   debris integrates manually against `9.81 * WorldScale.Scale`. Deterministic, no collider
+   interactions with the NavMesh, cheaper when several units die at once. Reusing the real parts
+   rather than generic cubes is free, looks like the figure coming apart, and keeps the team tint so
+   you can still tell whose unit died.
+4. **Visible sentry fire** — a tracer from sentry to the unit it is damaging, plus a hit flash on that
+   unit, driven off the damage tick itself so the visual cannot lie about the rule.
+5. Balance: `SiegeUnit.prefab.health` 10 → **3**. The number is *derived*, not guessed: 1 damage per
+   0.5 s tick against 3 HP is a 1.5 s fight, which is the "1–2 seconds of visible combat" the design
+   calls for. It also fixes the leftover test buff and makes sentry exposure lethal again.
+6. Lose condition — symmetric `OnPlayerLost` on `SiegeOutcomeController`, watching the already-built
+   `PlayerBaseHealth`.
+
+**Pass B — AI commander + its level ✅ DONE.**
+7. `LevelDefinition.hasAICommander` flag; `AICommanderProfile` ScriptableObject per difficulty tier
+   (`AIProfile_Recruit.asset` is the only tier so far).
+8. `AICommander` — Push / Intercept / Hold, ~1 s scored tick, telegraphed pushes.
+9. **Level 04 "The Gauntlet"** — three lanes from two split spines with a mid-board crossroads so Rally
+   can switch lanes; one rubble patch per lane; **two watchtowers for three lanes, so one is always
+   open** — the frontage rule expressed as level design. Winnable via `enemyBaseHealth 8` vs
+   `playerBaseHealth 14` plus a 1.5× slower AI economy. Tip text went in the existing
+   `LevelDefinition.briefing` field, already rendered on the card by `MainMenuController.PopulateCard`.
+
+**Pass C — Art and the obstacle bug ✅ DONE.**
+10. Rubble remodelled — an art fix for a *correctly* passable piece. See Section 8.
+11. Watchtower carve investigated and **ruled out** — see Section 10.
+
+### Next, in order
+12. **Sound** — nothing at all yet, and the most conspicuous gap in a demo video.
+13. **AI tuning + a second difficulty tier** — one profile, one device test. Needs real play.
+14. **Star ratings / per-level results** — `parTimeSeconds` and `parUnitsLost` are authored on every level and read by nothing.
+15. **Monetization finish** — Play Console product, Internal Testing, real on-device purchase. **The single biggest submission risk: the entry requirement is a working IAP, and this is the one requirement not yet met on real hardware.**
+16. **Sentry overhaul**, and with it the deferred cluster below.
+17. **Board elevation** (stretch) — **trigger: only after flat maps are confirmed solid on device AND the AI exists**, because NavMesh at tabletop scale has bitten this project twice and a NavMesh bug would otherwise be indistinguishable from an AI bug. Both conditions are now met.
+18. **Ship** — demo video, icon, screenshots, `PROJECT_STORY.md`, repo cleanup.
+
+### Deliberately deferred, and why — do not "helpfully" pick these up
+
+The sentry system is getting an overhaul later, and these were all **sentry-balance** work that the
+overhaul would invalidate. They are deferred *together*, on purpose:
+
+- **`coverLaneMargin` → fraction of `BoardPlane.Length`.** Still absolute (5 cm real per side). Was
+  flagged as the highest-value tuning lever; it stays flagged.
+- **Re-authoring The Narrows** for a genuinely central corridor.
+- **Two-origin garrison bucketing** in `MusterPhaseController` (player-side vs enemy-side chokepoints).
+  Not needed while the AI is gated to a level whose defences are authored deliberately.
+- **The three shipped levels are not to be touched** this round.
+
+Also skipped by decision, not oversight: a dedicated pre-launch tip *screen* (the briefing field on
+the level card already does the job), and star ratings/sound/board elevation (already sequenced above).
 
 **Level validator:** re-run after editing levels. It checks off-board pieces, base overlap, garrison-anchor-vs-cap mismatch, and zero sight-blockers — it caught two real design bugs that would otherwise have shipped.
 
@@ -173,7 +307,23 @@ Hand-authored `LevelDefinition` ScriptableObjects in **normalised board space** 
   Two related bugs fixed in the same pass: `NavMeshSurface.minRegionArea` silently overrides the project setting with no opt-in flag (the live component sat at Unity's default `2 m²` on a 0.198 m² board — check the **component**, not just ProjectSettings, if a navmesh mysteriously has holes at small scale); and `SentryArcVisualizer` built its fan at the world-space `DetectionRadius` but parented it under the sentry's ~0.04 localScale, rendering the covered wedge at ~4% of its true range. Also worth remembering: the erosion that severs a map comes from runtime `NavMeshObstacle` carving, not the bake — the surface's layer mask only ever sees the bare ground rectangle, so "why didn't the bake cut this" is the wrong question.
 - **`coverLaneMargin` was 0.25 → now 0.05 (fixed 2026-08-08), but is still an absolute real-world distance, unlike almost everything else in the project.** On the 33 cm-wide board this still makes a single wall's cover lane span a large fraction of the board width, which is very likely why the user found precision didn't feel like it bought much on their 2026-08-08 device test. Converting it to a fraction of `BoardPlane.Length` (matching `detectionRadiusFraction`, `arrivalDistanceFraction`, etc.) is flagged as the highest-value single tuning change — not yet done, deliberately, pending the user's confirmation.
 - **🚩 The Narrows does not currently enforce its "one safe corridor" premise — a design gap found on the 2026-08-08 device test, not a bug.** Measured on a 0.60 m board: the wall spine sits left of centre, giving an 11.7 cm left lane and an 18.3 cm right lane, both wide relative to the ~1 cm agent radius. Combined cover lanes (rubble + wall) make the entire left lane immune, while the single sentry's 12 cm detection radius doesn't reach the right lane. Neither route is punished. Do not retune blind — the better fix is very likely re-authoring the level so the wall forms a genuinely central corridor with sentry coverage on both flanks, which the user independently proposed. Best done alongside or after the AI commander, since a reactive defender changes what "corridor" means.
-- **`SiegeUnit.prefab.health` is 10 in the serialized prefab; the C# default is 2.** A leftover 5x buff from early testing (to tell real unit deaths apart from the since-fixed disappearing-unit bug), which made units survive 5s of uncovered sentry fire instead of 1s and masked how lethal exposure actually is. Reset to 2 before judging any combat balance.
+- **🚩 "Units walk through rubble" is NOT a bug — do not make rubble solid.** Reported from the 2026-08-08 device test and it is working exactly as designed: `TerrainObjectSpawner.BlocksMovement` exempts `RubbleCover` deliberately, and plan.md's archetype table has always specified rubble as passable cover. That exemption *is* the fix for the severed-map bug — rubble used to carve, and on The Narrows the rubble line plus the wall spine left a **5 mm gap** that agent-radius erosion sealed completely. Re-adding the carve re-breaks all three maps. **It is an art problem:** the model reads as a solid heap, so walking through it looks wrong. The remodel brief is *low, scattered debris with visible gaps between chunks* — something a figure would obviously clamber over. Fixing the diagnosis, not the mechanic.
+- **🚩 "Units walk through the watchtower" — PARTLY DIAGNOSED 2026-08-08, bake order RULED OUT.** A Play-mode probe (`CarveProbe`, since deleted) reproduced `TerrainObjectSpawner`'s obstacle construction exactly and measured both bake orders:
+
+  | Case | centre walkable? | path through |
+  |---|---|---|
+  | A: obstacle spawned **before** `BuildNavMesh` (LevelBuilder's real order) | **No** | routes around, 4 corners |
+  | B: obstacle spawned **after** `BuildNavMesh` | **No** | routes around, 4 corners |
+
+  A third case was then run to close the last gap — the probe had used an unrotated, unit-scale parent, whereas `LevelBuilder` reparents each piece under `BoardRoot` (rotated by the player's twist, uniformly scaled to board length) via `SetParent(worldPositionStays: true)`:
+
+  | Case | centre walkable? | obstacle world scale |
+  |---|---|---|
+  | C: reparented under a **rotated, 3×-scaled** BoardRoot | **No** | `(0.24, 0.21, 0.24)` — exactly the intended footprint |
+
+  **Verdict: NavMeshObstacle carving is correct in every configuration, including the real one. The watchtower is not broken.** The leading hypothesis was wrong — the fourth plausible-sounding diagnosis this project has had disproved by measurement, which is precisely why the rule exists.
+  **Most likely explanation for the original report:** the piece being walked through was *rubble*, which is passable by design and — until the 2026-08-08 remodel — looked exactly like a solid barrier, so the behaviour was correct and the art was lying. Two lesser possibilities if it recurs: a unit's visual mesh brushing a corner while its agent centre correctly routes around (NavMesh hugs corners tightly — the measured detour is only 0.028), or the garrison sentry, which `MusterPhaseController` snaps to the nearest walkable point to the watchtower's *centre* and therefore stands just outside the carve, reading as "inside" the tower. **Re-test on device with the new rubble before spending more on this.**
+- **`SiegeUnit.prefab.health` was 10 in the serialized prefab while the C# default said 2** — a leftover 5x test buff (to tell real unit deaths apart from the since-fixed disappearing-unit bug) that made units survive 5 s of uncovered sentry fire instead of 1 s. **Now 3, and the value is derived rather than guessed:** at 1 damage per 0.5 s tick, 3 HP is a 1.5 s fight, which is the 1–2 s of readable combat Mechanic 6 is specced for. Changing tick rate or damage means re-deriving this.
 - **Landscape only.** Canvases are 1920x1080. Portrait would need re-authoring, not a setting flip.
 - **`EditorSceneManager.OpenScene` invalidates asset references loaded *before* it**, silently no-opping assignments. Always OpenScene first, then load assets, then assign.
 - **`GameObject.Find` skips inactive objects** — `BoardRoot` is intentionally inactive until placed.

@@ -20,6 +20,27 @@ namespace ScrapSiege.Siege
 
         public int CurrentResources { get; private set; }
 
+        /// <summary>Current seconds between ticks, so a difficulty multiplier can be applied relative to it.</summary>
+        public float TickIntervalSeconds => tickIntervalSeconds;
+
+        /// <summary>
+        /// Retunes the income rate. Used by <see cref="AICommander"/> to run the AI's own pool slower
+        /// or faster than the player's - which is how difficulty is expressed without ever giving the
+        /// AI resources it did not earn.
+        ///
+        /// Safe to call while running: the repeating invoke is restarted, because changing the field
+        /// alone would leave the original interval scheduled and the new value silently ignored.
+        /// </summary>
+        public void ConfigureTickInterval(float seconds)
+        {
+            tickIntervalSeconds = Mathf.Max(0.1f, seconds);
+
+            if (!isActiveAndEnabled) return;
+
+            CancelInvoke(nameof(Tick));
+            InvokeRepeating(nameof(Tick), tickIntervalSeconds, tickIntervalSeconds);
+        }
+
         private void Awake()
         {
             // Must not tick/spend during Fortify - only SiegePhaseController.StartSiege() turns

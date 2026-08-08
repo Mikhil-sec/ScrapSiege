@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 516c7d8ea806ad94e965c51aea259ed3, type: 3}
+  m_Name: AIProfile_Recruit
+  m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Siege.AICommanderProfile
+  displayName: Recruit
+  decisionTickSeconds: 1
+  reactionDelaySeconds: 2
+  resourceIntervalMultiplier: 1.5
+  pushCost: 1
+  interceptCost: 1
+  holdBankTarget: 3
+  maxLiveUnits: 4
+  telegraphLeadSeconds: 1.4
+  coveredPreferenceChance: 0.35
+  interceptThreatThreshold: 0.4
+  laneSamples: 5
+  spawnOffsetFraction: 0.1

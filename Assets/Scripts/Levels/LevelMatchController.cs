@@ -34,6 +34,10 @@ namespace ScrapSiege.Levels
         [SerializeField] private RallyController rallyController;
         [SerializeField] private DeployReticle deployReticle;
 
+        [Tooltip("Optional. Enabled only for levels whose LevelDefinition opts in via hasAICommander, " +
+                 "so the original one-directional levels are completely unaffected by it.")]
+        [SerializeField] private AICommander aiCommander;
+
         [Tooltip("Optional. Its locked-plane outline is hidden once the board is committed, so the " +
                  "AR plane polygon stops being drawn across the battlefield during the siege.")]
         [SerializeField] private ScrapSiege.AR.PlaneLockController planeLock;
@@ -57,6 +61,10 @@ namespace ScrapSiege.Levels
         public Transform EnemyBase => builder != null ? builder.EnemyBase : null;
         public BaseHealth EnemyBaseHealth => builder != null ? builder.EnemyBaseHealth : null;
 
+        /// <summary>The player's own base. Exposed for the AI commander, which attacks it, and for the lose condition.</summary>
+        public Transform PlayerBase => builder != null ? builder.PlayerBase : null;
+        public BaseHealth PlayerBaseHealth => builder != null ? builder.PlayerBaseHealth : null;
+
         private void Awake()
         {
             CheckRef(placement, nameof(placement));
@@ -72,6 +80,31 @@ namespace ScrapSiege.Levels
         {
             if (reference == null)
                 Debug.LogError($"LevelMatchController: '{fieldName}' is not assigned - the match will not start correctly.", this);
+        }
+
+        /// <summary>
+        /// Turns the AI commander on, but only for levels that opted in. Everything else - the three
+        /// original levels - runs exactly as it did before, with no opponent and no way to lose.
+        ///
+        /// Registered with the outcome controller rather than being switched off there directly,
+        /// because the commander does not exist on most levels and a permanently-null Inspector slot
+        /// would be indistinguishable from a wiring mistake.
+        /// </summary>
+        private void StartAICommander()
+        {
+            if (aiCommander == null) return;
+
+            if (ActiveLevel == null || !ActiveLevel.hasAICommander)
+            {
+                aiCommander.enabled = false;
+                return;
+            }
+
+            aiCommander.ApplyProfile(ActiveLevel.aiProfile);
+            aiCommander.enabled = true;
+            outcomeController.RegisterStopOnEnd(aiCommander);
+
+            Debug.Log($"LevelMatchController: AI commander enabled for '{ActiveLevel.displayName}'.");
         }
 
         private void OnEnable()
@@ -142,10 +175,20 @@ namespace ScrapSiege.Levels
             else
                 Debug.LogError("LevelMatchController: level built with no enemy base health - the win condition can never fire.", this);
 
+            // The player base has been built by LevelBuilder since authored levels landed, but
+            // nothing ever watched it, because until the AI commander there was no way to lose.
+            if (builder.PlayerBaseHealth != null)
+                outcomeController.WatchPlayerBase(builder.PlayerBaseHealth);
+            else
+                Debug.LogWarning("LevelMatchController: level built with no player base health - the lose condition cannot fire. " +
+                                 "Expected only if LevelBuilder has no Player Base Prefab assigned.", this);
+
             resourceEconomy.enabled = true;
             deploymentController.enabled = true;
             if (rallyController != null) rallyController.enabled = true;
             if (deployReticle != null) deployReticle.enabled = true;
+
+            StartAICommander();
 
             OnSiegeStarted?.Invoke();
         }

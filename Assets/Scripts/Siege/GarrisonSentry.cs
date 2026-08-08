@@ -45,6 +45,22 @@ namespace ScrapSiege.Siege
         public float FacingArcDegrees => facingArcDegrees;
 
         /// <summary>
+        /// Which side this sentry defends. Only units of the OPPOSING team are ever shot.
+        ///
+        /// Defaults to Enemy, which is what every sentry has effectively been since garrisons were
+        /// added - MusterPhaseController spawns them to defend against the player. Before the AI
+        /// commander existed there was only one mobile army, so "damage everything in
+        /// SiegeUnit.Active" happened to be correct; the moment a second army joins that same static
+        /// list it becomes friendly fire.
+        /// </summary>
+        public Team Team { get; private set; } = Team.Enemy;
+
+        private float boardLength;
+        private SentryFireVisualizer fireVisualizer;
+
+        public void SetTeam(Team team) => Team = team;
+
+        /// <summary>
         /// Rescales this sentry's reach to the board it is defending. Called by
         /// MusterPhaseController immediately after spawning, which is after Awake but before Start -
         /// which is exactly why SentryArcVisualizer builds its fan in Start rather than Awake.
@@ -53,6 +69,7 @@ namespace ScrapSiege.Siege
         {
             if (boardLength <= 0f) return;
 
+            this.boardLength = boardLength;
             detectionRadius = detectionRadiusFraction * boardLength;
             navMeshSampleDistance = navMeshSampleFraction * boardLength;
         }
@@ -67,6 +84,8 @@ namespace ScrapSiege.Siege
             transform.localScale *= WorldScale.Scale;
             detectionRadius = WorldScale.Metres(detectionRadius);
             navMeshSampleDistance = WorldScale.Metres(navMeshSampleDistance);
+
+            fireVisualizer = GetComponent<SentryFireVisualizer>();
         }
 
         private void OnEnable()
@@ -84,10 +103,24 @@ namespace ScrapSiege.Siege
             foreach (var unit in SiegeUnit.Active)
             {
                 if (unit == null) continue;
+
+                // SiegeUnit.Active holds BOTH armies now. Without this filter an enemy sentry would
+                // shoot the AI commander's own advancing units.
+                if (unit.Team == Team) continue;
+                if (!unit.IsAlive) continue;
+
                 if (!IsInArc(unit.transform.position)) continue;
                 if (IsInCoverLane(unit.transform.position)) continue;
 
+                // Cover is deliberately still total immunity here rather than the fractional
+                // reduction unit-vs-unit combat uses. This is the sentry's long-standing tuned rule
+                // and the sentry system is awaiting its own overhaul - changing it now would move
+                // balance the user has already device-tested, for no benefit to this pass.
                 unit.TakeDamage(damagePerTick);
+
+                // Reported from the damage tick itself, never re-derived, so the tracer physically
+                // cannot claim a shot that dealt no damage.
+                if (fireVisualizer != null) fireVisualizer.ReportHit(unit, boardLength);
             }
         }
 

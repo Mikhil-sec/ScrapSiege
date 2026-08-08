@@ -161,6 +161,13 @@ namespace ScrapSiege.Siege
             foreach (var unit in SiegeUnit.Active)
             {
                 if (unit == null) continue;
+
+                // SiegeUnit.Active holds both armies. Rally is the PLAYER's board-wide order - without
+                // this filter it would helpfully redirect the AI commander's attackers as well, which
+                // would read as the order doing nothing (or worse, as the AI dodging).
+                if (unit.Team != Team.Player) continue;
+                if (!unit.IsAlive) continue;
+
                 if (unit.RallyTo(worldPoint, snapDistance)) redirected++;
             }
 
