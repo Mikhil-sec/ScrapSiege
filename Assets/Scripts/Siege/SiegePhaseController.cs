@@ -70,6 +70,8 @@ namespace ScrapSiege.Siege
         /// <summary>Wire to the "Done" button - replaces the direct FinishFortify() wire.</summary>
         public void StartSiege()
         {
+            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.PhaseChange);
+
             fortify.FinishFortify();
 
             Vector3 tableOrigin = FindTableReferencePoint();

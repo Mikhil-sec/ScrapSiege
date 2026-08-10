@@ -44,6 +44,11 @@ namespace ScrapSiege.UI
         {
             if (selectable != null && !selectable.IsInteractable()) return;
             target = pressedScale;
+
+            // Every interactive button in the game already carries this component for the press
+            // animation, so hanging the click sound here covers the whole UI without touching a
+            // single UnityEvent in either scene.
+            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.UiTap);
         }
 
         public void OnPointerUp(PointerEventData eventData) => target = 1f;

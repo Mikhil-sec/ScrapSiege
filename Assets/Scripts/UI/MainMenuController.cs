@@ -41,6 +41,14 @@ namespace ScrapSiege.UI
         [Header("Paywall")]
         [SerializeField] private GameObject paywallPanel;
 
+        [Tooltip("Shown only while the 'pro' entitlement is active, so the purchase has a visible " +
+                 "effect that does not depend on noticing a cosmetic palette change.")]
+        [SerializeField] private GameObject proActiveBadge;
+
+        [Tooltip("The Go Pro button, hidden once Pro is active - offering an upgrade the player " +
+                 "already owns reads as a bug.")]
+        [SerializeField] private GameObject goProButton;
+
         private readonly List<GameObject> spawnedCards = new List<GameObject>();
 
         private void Awake()
@@ -51,9 +59,44 @@ namespace ScrapSiege.UI
             else levelCardTemplate.SetActive(false);
         }
 
+        private void OnEnable()
+        {
+            ProEntitlement.Changed += OnProEntitlementChanged;
+        }
+
+        private void OnDisable()
+        {
+            ProEntitlement.Changed -= OnProEntitlementChanged;
+        }
+
         private void Start()
         {
             ShowTitle();
+            ApplyProState();
+        }
+
+        /// <summary>
+        /// The entitlement resolves asynchronously (RevenueCat has to reach the network), and a
+        /// purchase can complete while the paywall is sitting on top of an already-built level list.
+        /// Neither case re-enters <see cref="ShowLevelSelect"/>, so without this the menu keeps
+        /// showing Pro levels as locked until the app is restarted.
+        /// </summary>
+        private void OnProEntitlementChanged(bool unlocked)
+        {
+            Debug.Log($"MainMenuController: Pro entitlement changed to {unlocked} - refreshing menu.");
+            ApplyProState();
+
+            // Only worth rebuilding if the list is actually on screen; ShowLevelSelect rebuilds it
+            // from scratch on every entry anyway.
+            if (levelSelectScreen != null && levelSelectScreen.activeInHierarchy)
+                BuildLevelList();
+        }
+
+        private void ApplyProState()
+        {
+            bool pro = ProEntitlement.IsUnlocked;
+            if (proActiveBadge != null) proActiveBadge.SetActive(pro);
+            if (goProButton != null) goProButton.SetActive(!pro);
         }
 
         public void ShowTitle()

@@ -210,6 +210,7 @@ convincing were all wrong.
   so you crouch to look along a ridge and rise to see over it. Held deliberately until the flat
   maps are proven, because navigation at tabletop scale has already bitten us twice.
 - More authored levels, star ratings, sound.
-- Pro level packs behind the already-built entitlement, and a Google Play Console product so
-  a real purchase can complete on a device rather than only in the Editor.
+- Pro level packs behind the already-built entitlement. The Google Play Console product,
+  RevenueCat registration and a signed release build are done; what's left is uploading to
+  Internal Testing and completing one real on-device purchase, rather than only in the Editor.
 - The demo video and submission assets.

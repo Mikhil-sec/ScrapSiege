@@ -123,6 +123,8 @@ namespace ScrapSiege.Siege
         {
             if (target == null) return;
 
+            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.SentryFire, 0.7f);
+
             DrawTracer(target, boardLength);
             FlashTarget(target);
         }

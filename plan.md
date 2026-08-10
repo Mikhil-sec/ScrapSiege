@@ -169,6 +169,8 @@ Hand-authored `LevelDefinition` ScriptableObjects in **normalised board space** 
 | 01 | The Narrows | Precision — one cover corridor watched by a sentry |
 | 02 | Blind Spire | Line of sight — two sentries hidden behind a centre spire |
 | 03 | Two Lanes | Rally — a spine splits the field; lanes rejoin only deep |
+| 04 | The Gauntlet | The AI commander — three lanes, Recruit tier, the first level you can lose |
+| 05 | The Foundry | **Pro only.** Everything at once, against the Veteran tier |
 
 > **Authoring gotcha:** `MusterPhaseController` fills garrison slots in **terrain array order**. In Blind Spire the two watchtowers must come *before* the spire, or the spire steals a sentry and the map's premise breaks. A validator (see Section 9) checks this.
 
@@ -178,12 +180,29 @@ Hand-authored `LevelDefinition` ScriptableObjects in **normalised board space** 
 
 **Already built and working — do not break it.**
 
-- **Project:** "ScrapSiege" (`proj3a523262`). Entitlement `pro`.
-- **Test Store** (`appda5538b8e2`) — product `scrap_siege_pro_monthly` ($2.99/mo) in the `default` offering's `$rc_monthly` package. Works in Editor Play Mode only; a real Android build always goes through Google Play Billing.
-- **Play Store** (`appa37d9670f8`, `com.mikhilnaika.scrapsiege`) — app entry created, **no product yet**, blocked on a Google Play Console account. Reserved naming: product `scrap_siege_pro`, base plan `monthly` → store identifier `scrap_siege_pro:monthly`.
+- **Project:** "ScrapSiege" (`proj3a523262`). Entitlement `pro` (`entl844b33dd6b`).
+- **Test Store** (`appda5538b8e2`) — product `scrap_siege_pro_monthly` ($2.99/mo) in the `default` offering's `$rc_monthly` package (`pkgef5eaf57c5e`). Works in Editor Play Mode only; a real Android build always goes through Google Play Billing.
+- **Play Store** (`appa37d9670f8`, `com.mikhilnaika.scrapsiege`) — app created in Play Console, subscription live: product `scrap_siege_pro`, base plan `monthly` → store identifier `scrap_siege_pro:monthly`, registered in RevenueCat as `prod759b1f896f` and attached to both the `pro` entitlement and the `$rc_monthly` package (2026-08-09). The scene (`Assets/Scenes/ARTest.unity`, `MonetizationManager.revenueCatApiKey`) now carries the real Play Store key `goog_BPqxjAwHxIuYgSZXpVxbuhuaLbt`, not the Test Store key.
+- **Signing:** upload keystore lives outside the repo at `C:\Users\naika\keystores\scrapsiege-upload.jks` (alias `scrapsiege-upload`). `Scrap Siege > Build Android APK (RELEASE - for Play Store)` produces a signed, non-debuggable `build/ScrapSiege.aab` — verified with `bundletool`/`apksigner`/`aapt2` on 2026-08-09. Uploaded to Internal Testing and a real license-tester purchase completed 2026-08-10. Full detail and exact verification commands are in `SECURITY.md`'s findings register.
+
+  **The keystore password resets on every Editor restart, and that used to block development builds too.** Unity persists `androidUseCustomKeystore: 1` into `ProjectSettings.asset` but deliberately never persists the passwords, so after reopening the Editor *any* Android build — including a plain USB development APK that has no business touching the upload key — failed asking for a password that no longer existed. Two fixes, both in `Assets/Editor/BuildScript.cs`:
+
+  - **Development builds now switch `useCustomKeystore` off for the duration of the build and restore it afterwards**, falling back to the Android debug certificate. That is all `adb install` needs, and `ProjectSettings.asset` is left byte-identical. Dev builds never prompt for a password again.
+  - **Release builds still require the real key**, and `Scrap Siege > Apply Release Keystore Passwords (from environment)` re-applies it from the `SCRAPSIEGE_KEYSTORE_PASS` environment variable (optionally `SCRAPSIEGE_KEYALIAS_PASS`). Environment, never a file in the repo — this repo is public. Set it as a Windows *user* environment variable and restart Unity Hub so the Editor inherits it.
 - **Code:** `Assets/Monetization/` sits deliberately **outside** `ScrapSiege.Runtime.asmdef` because the RevenueCat SDK ships no asmdef. `Assets/Scripts/Monetization/ProEntitlement.cs` is the decoupled gate gameplay reads.
 
-**What Pro unlocks:** level packs (`LevelDefinition.requiresPro`, already wired through `LevelCatalog.IsUnlocked`), cosmetic board themes, and the saturated terrain palette (`TerrainObjectSpawner.ProColorForArchetype`, shipped).
+**What Pro unlocks:**
+
+- **Level 05 "The Foundry"** — `requiresPro: true`, gated through `LevelCatalog.IsUnlocked`. Added rather than converting a free level, so Pro is a value tier and not a lockout. It is also the only level that runs the harder **Veteran** AI tier.
+- **The saturated terrain palette** (`TerrainObjectSpawner.ProColorForArchetype`).
+- A **PRO ACTIVE** badge in the main menu, replacing the Go Pro button.
+
+**Entitlement changes must be live, and this is easy to get wrong.** The 2026-08-10 purchase test proved the plumbing worked and *still* looked broken, because:
+
+- `TerrainObjectSpawner` keyed its material cache on `(archetype, role, isPro)`. Flipping to Pro mid-match changed which cache entry new lookups hit, while every already-spawned renderer went on holding the free-palette material. The Pro state is no longer part of that key — there is one material per slot, and `ProEntitlement.Changed` repaints them in place, so the board recolours on the same frame.
+- `MainMenuController` computed each card's lock state once while building the list. It now also rebuilds on `ProEntitlement.Changed`, which matters because the paywall sits *on top of* the level select and closing it never re-enters `ShowLevelSelect()`.
+
+`ProEntitlement.Changed` had zero subscribers for the entire time the entitlement existed. **Anything that reads `ProEntitlement.IsUnlocked` must also subscribe to `Changed`, or it will silently be a restart-only feature.**
 
 ## 8. Art pipeline
 
@@ -224,6 +243,33 @@ hard barrier and walking through it looked like a bug. Now 18 low scattered chun
 **0.26** of the unit cube, with visible floor between them and the solid base plate broken into
 fragments. 144 verts, down from 696. The four material slots (`SS_Plate/SS_Accent/SS_Body/SS_Metal`)
 are preserved in order, because `MaterialSlots.RoleForSlot` reads them by name.
+
+### Audio — synthesized, not recorded (added 2026-08-10)
+
+Every sound effect is generated from arithmetic at load in `Assets/Scripts/Audio/ProceduralSfx.cs`:
+decaying oscillators (sine/square/triangle/saw), low-passed noise bursts, a ~2 ms attack ramp on
+each layer to kill start-of-clip clicks, and a `tanh` soft-clip on the sum. Nine sounds, all under a
+second, a few milliseconds to build in total.
+
+This is a deliberate choice, not a placeholder. Licensed third-party audio in a **public** repo is an
+attribution and redistribution problem for a jam submission, and this project has no way to record
+its own. Synthesis keeps the repo free of binary blobs and matches the flat-shaded art direction —
+the game already looks synthetic.
+
+`Assets/Scripts/Audio/GameAudio.cs` is the only entry point: `GameAudio.Play(Sfx.Deploy)`, callable
+from anywhere. It **bootstraps itself** via `[RuntimeInitializeOnLoadMethod]` rather than being a
+prefab wired into each scene — a missing scene reference would silence the game in exactly the build
+nobody re-checks. Eight round-robin `AudioSource` voices so a busy siege doesn't cut itself off, and
+per-sound minimum intervals on the ones that can retrigger many times a second (sentry fire, unit
+death) so they read as events rather than as a buzz. Sound is **2D on purpose**: the board is a
+~60 cm tabletop viewed at arm's length, so every source is effectively equidistant and 3D panning
+would spend `WorldScale` care to produce something inaudible.
+
+The UI click is hung on `UIButtonMotion.OnPointerDown`, which every interactive button already
+carries for its press animation — that covers the whole UI without touching a single UnityEvent in
+either scene.
+
+**Not done:** no music, and the mix has never been heard on phone speakers, only assumed.
 
 ## 9. Remaining work, in order
 
@@ -276,7 +322,9 @@ real attackers it is the primary source of stakes, so it came first.
 12. **Sound** — nothing at all yet, and the most conspicuous gap in a demo video.
 13. **AI tuning + a second difficulty tier** — one profile, one device test. Needs real play.
 14. **Star ratings / per-level results** — `parTimeSeconds` and `parUnitsLost` are authored on every level and read by nothing.
-15. **Monetization finish** — Play Console product, Internal Testing, real on-device purchase. **The single biggest submission risk: the entry requirement is a working IAP, and this is the one requirement not yet met on real hardware.**
+15. **Monetization finish** — ✅ **complete as of 2026-08-10.** Play Console product live, RevenueCat registration done, signed release AAB verified, uploaded to Internal Testing, and a real license-tester purchase completed on device with the `pro` entitlement returning active. The entry requirement is met and this is no longer a submission risk.
+
+    The follow-up that purchase exposed: the entitlement resolved correctly but **nothing visibly changed**, because the only Pro feature was a terrain recolour read once at spawn time, with no subscriber to `ProEntitlement.Changed`, and every level had `requiresPro: false`. Fixed the same day — see Section 7.
 16. **Sentry overhaul**, and with it the deferred cluster below.
 17. **Board elevation** (stretch) — **trigger: only after flat maps are confirmed solid on device AND the AI exists**, because NavMesh at tabletop scale has bitten this project twice and a NavMesh bug would otherwise be indistinguishable from an AI bug. Both conditions are now met.
 18. **Ship** — demo video, icon, screenshots, `PROJECT_STORY.md`, repo cleanup.
@@ -337,7 +385,10 @@ the level card already does the job), and star ratings/sound/board elevation (al
 
 ### Submission checklist
 - [x] App builds and runs on device
-- [x] RevenueCat SDK integrated (real IAP pending Play Console)
+- [x] RevenueCat SDK integrated, Play Console product live, signed release build verified
+- [x] **Real on-device purchase completed** (2026-08-10, license tester on Internal Testing) — the entry requirement is met
+- [x] Pro actually does something visible: level 05 "The Foundry" is `requiresPro`, and the terrain palette now repaints live on entitlement change instead of only after a restart
+- [x] Sound (procedurally synthesized — no audio files in the repo)
 - [ ] Public open-source repo, cleaned up
 - [ ] Demo video ≤2 min
 - [ ] `PROJECT_STORY.md` finalised for Devpost

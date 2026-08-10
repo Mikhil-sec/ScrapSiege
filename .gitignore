@@ -105,3 +105,15 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# Signing keys and credential files - this project's keystore lives outside the repo
+# entirely (see SECURITY.md), but these patterns are a defense-in-depth backstop in
+# case one ever ends up under the project root by accident.
+*.jks
+*.keystore
+*.p12
+*.pem
+*.env
+*CREDENTIALS*
+google-services.json
+GoogleService-Info.plist

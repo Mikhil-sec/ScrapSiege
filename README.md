@@ -32,7 +32,7 @@ The full loop is **playable end to end on device and accepted by device testing 
 - **Sentry arcs** — garrison units cover a 150° facing arc drawn on the table, so walking around the board to reach their blind side is a real tactic.
 - **Route variety** — **Direct** (shortest line; threads a cover corridor only when that genuinely is shortest) vs **Covered** (detours to hug cover and avoid garrison fire). Driven by *per-agent* NavMesh area costs, so both modes can reach anywhere and differ only in what they value.
 - **Low-poly art** — Blender-built trooper and terrain models with procedural march/bob/lean/lunge animation driven from navigation velocity. No rigging.
-- **RevenueCat integration** — SDK installed, dashboard configured, one real Pro-gated cosmetic working in Editor Play Mode.
+- **RevenueCat integration** — SDK installed, dashboard configured, one real Pro-gated cosmetic. The real Play Store subscription product (`scrap_siege_pro:monthly`) is created and registered in RevenueCat, and the scene carries the real Play Store API key. A signed, non-debuggable release **AAB** builds cleanly via `Scrap Siege > Build Android APK (RELEASE - for Play Store)`. Not yet uploaded to Play Console Internal Testing, so no real on-device purchase has been completed yet.
 
 ### Not built yet
 
@@ -43,12 +43,13 @@ The full loop is **playable end to end on device and accepted by device testing 
 
 ### Known limitations
 
-- **The AI commander is v1 and has had one device test.** Only the "Recruit" difficulty tier exists. Its cadence, unit cap and reaction delay are derived from design intent rather than tuned against real play.
+- **The AI commander is v1 and has had one device test.** Two difficulty tiers now exist — "Recruit" (levels 4) and "Veteran" (level 5, Pro) — but both sets of numbers are still derived from design intent rather than tuned against real play. Veteran has not been played on device at all yet.
 - Only **one generic unit type** — no combat variety yet. The AI's "unit mix" is currently just a cover-preference roll.
 - **AR plane detection is this project's proven weak point.** See `plan.md` Section 10.
 - **Deferred as a group with the sentry overhaul** (all sentry-balance work that the overhaul would invalidate): `coverLaneMargin` is still an absolute real-world distance rather than a fraction of board length, which makes cover disproportionately generous on a small board; and **The Narrows doesn't enforce its "one safe corridor" premise** — both sides of the wall are viable, unpunished routes. Design gaps, not bugs; see `plan.md` Section 10.
 - **Unit size is not board-relative** — units stay ~5cm at any board size, so on a pinched-out large board they're proportionally small.
-- **RevenueCat purchases don't complete on a real device yet** — the product only exists on the Test Store; real builds go through Google Play Billing, which needs a Play Console product. **This is the biggest submission risk.**
+- **RevenueCat purchases are confirmed working on a real device** (2026-08-10) — the AAB is on Internal Testing, a license-tester subscription was purchased end to end, and the `pro` entitlement came back active. The entry requirement is met. What Pro *does* is still thin, though: one Pro-only level (05 The Foundry) and a saturated terrain palette.
+- **Audio is synthesized at runtime, not recorded.** Every sound effect is generated procedurally in `ProceduralSfx.cs` — no audio files in the repo, no licensing to track. There is no music, and the mix has not been checked on phone speakers.
 - **Landscape only.** All canvases are authored at 1920×1080; portrait would need re-authoring, not a settings flip.
 - **Level card briefings must stay under ~110 characters.** The card is fixed-height; a 175-character briefing overflowed its background box. The four shipped levels sit at 94–106.
 
@@ -99,7 +100,7 @@ Assets/Scenes/ARTest.unity      - the AR match scene (build index 1)
 ## Running it
 
 1. Open in Unity 6 with Android Build Support installed.
-2. Build & Run to an ARCore-capable Android device. (Tested on a Samsung Galaxy Tab S6 Lite and a Galaxy A56 — neither has a depth sensor.) `Scrap Siege > Build Android APK (Development)` in the menu bar does the same thing and writes `build/ScrapSiege.apk`.
+2. Build & Run to an ARCore-capable Android device. (Tested on a Samsung Galaxy Tab S6 Lite and a Galaxy A56 — neither has a depth sensor.) `Scrap Siege > Build Android APK (Development)` in the menu bar does the same thing and writes `build/ScrapSiege.apk`. `Scrap Siege > Build Android APK (RELEASE - for Play Store)` produces a signed, non-debuggable `build/ScrapSiege.aab` for Play Console upload — see `SECURITY.md` before using it; it refuses to run without a real upload keystore configured.
 3. In the app: **PLAY** → pick a level → sweep the camera over a surface until the readout shows an area → **Lock This Table** → tap to drop the board, fit it with drag/pinch/twist → **Confirm Board**.
 4. In the siege: tap the table to deploy. Lower the device for precise placement, raise it for the overview and to unlock **Rally**.
 

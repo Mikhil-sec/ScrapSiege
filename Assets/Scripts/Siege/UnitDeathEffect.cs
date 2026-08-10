@@ -62,6 +62,8 @@ namespace ScrapSiege.Siege
         {
             if (unit == null) return;
 
+            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.UnitDeath);
+
             var renderers = unit.GetComponentsInChildren<Renderer>();
             if (renderers == null || renderers.Length == 0) return;
 

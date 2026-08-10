@@ -152,6 +152,8 @@ namespace ScrapSiege.Siege
                 return;
             }
 
+            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.Rally);
+
             float boardLength = boardPlane != null ? boardPlane.Length : 0f;
             float snapDistance = boardLength > 0f
                 ? navMeshSnapFraction * boardLength

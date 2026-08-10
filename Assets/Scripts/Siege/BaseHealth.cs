@@ -41,6 +41,7 @@ namespace ScrapSiege.Siege
 
             CurrentHealth = Mathf.Max(0, CurrentHealth - amount);
             OnHealthChanged?.Invoke(CurrentHealth);
+            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.BaseHit);
             Debug.Log($"{name}: took {amount} damage, {CurrentHealth}/{maxHealth} remaining.", this);
 
             if (CurrentHealth == 0)

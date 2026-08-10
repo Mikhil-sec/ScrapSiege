@@ -23,6 +23,25 @@ public class PaywallController : MonoBehaviour
         RefreshOffering();
     }
 
+    /// <summary>
+    /// MonetizationManager configures RevenueCat from Start() at execution order 100, so it is not
+    /// available during another object's Awake/OnEnable on the first frame of a scene - and it is
+    /// absent entirely from any scene that does not carry it. Every entry point checks rather than
+    /// dereferencing Instance directly, because the failure mode otherwise is a NullReferenceException
+    /// inside a UI callback, which surfaces as a dead button rather than as an obvious error.
+    /// </summary>
+    private bool TryGetManager(out MonetizationManager manager)
+    {
+        manager = MonetizationManager.Instance;
+        if (manager != null) return true;
+
+        SetPrice("--");
+        SetStatus("Store unavailable.");
+        if (subscribeButton != null) subscribeButton.interactable = false;
+        Debug.LogError("PaywallController: no MonetizationManager in the scene (or it has not started yet) - the paywall cannot reach RevenueCat.", this);
+        return false;
+    }
+
     private void RefreshOffering()
     {
         // Both labels are fully owned by this method from here on - never leave one showing a
@@ -32,7 +51,9 @@ public class PaywallController : MonoBehaviour
         SetStatus("");
         if (subscribeButton != null) subscribeButton.interactable = false;
 
-        MonetizationManager.Instance.FetchOfferings((offerings, error) =>
+        if (!TryGetManager(out var manager)) return;
+
+        manager.FetchOfferings((offerings, error) =>
         {
             if (error != null)
             {
@@ -60,11 +81,12 @@ public class PaywallController : MonoBehaviour
     public void OnSubscribePressed()
     {
         if (monthlyPackage == null) return;
+        if (!TryGetManager(out var manager)) return;
 
         if (subscribeButton != null) subscribeButton.interactable = false;
         SetStatus("Processing...");
 
-        MonetizationManager.Instance.Purchase(monthlyPackage, (success, error) =>
+        manager.Purchase(monthlyPackage, (success, error) =>
         {
             if (success)
             {
@@ -82,9 +104,11 @@ public class PaywallController : MonoBehaviour
     /// <summary>Wire to a "Restore Purchases" button.</summary>
     public void OnRestorePressed()
     {
+        if (!TryGetManager(out var manager)) return;
+
         SetStatus("Restoring...");
 
-        MonetizationManager.Instance.Restore((success, error) =>
+        manager.Restore((success, error) =>
         {
             SetStatus(success ? "Restored." : (error ?? "Restore failed."));
         });

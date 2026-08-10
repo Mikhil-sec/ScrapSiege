@@ -71,12 +71,14 @@ namespace ScrapSiege.Siege
         private void HandleEnemyBaseDestroyed()
         {
             if (!EndMatch()) return;
+            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.Victory);
             OnPlayerWon?.Invoke();
         }
 
         private void HandlePlayerBaseDestroyed()
         {
             if (!EndMatch()) return;
+            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.Defeat);
             OnPlayerLost?.Invoke();
         }
 

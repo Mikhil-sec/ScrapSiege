@@ -1,0 +1,86 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5af290a2ae7e47b4a895987ee87ad2a8, type: 3}
+  m_Name: 05_TheFoundry
+  m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Levels.LevelDefinition
+  displayName: The Foundry
+  briefing: A veteran commander holds the foundry. Break line of sight at the spire,
+    then Rally through a flank.
+  levelNumber: 5
+  requiresPro: 1
+  boardAspect: 0.6
+  terrain:
+  - archetype: 4
+    position: {x: 0.24, y: 0.7}
+    size: {x: 0.07, y: 0.07}
+    rotationDegrees: 0
+    height: 2
+  - archetype: 4
+    position: {x: 0.76, y: 0.7}
+    size: {x: 0.07, y: 0.07}
+    rotationDegrees: 0
+    height: 2
+  - archetype: 2
+    position: {x: 0.5, y: 0.55}
+    size: {x: 0.1, y: 0.1}
+    rotationDegrees: 0
+    height: 2
+  - archetype: 3
+    position: {x: 0.3, y: 0.4}
+    size: {x: 0.03, y: 0.2}
+    rotationDegrees: 0
+    height: 1
+  - archetype: 3
+    position: {x: 0.7, y: 0.4}
+    size: {x: 0.03, y: 0.2}
+    rotationDegrees: 0
+    height: 1
+  - archetype: 1
+    position: {x: 0.15, y: 0.3}
+    size: {x: 0.09, y: 0.1}
+    rotationDegrees: 0
+    height: 0
+  - archetype: 1
+    position: {x: 0.5, y: 0.28}
+    size: {x: 0.1, y: 0.1}
+    rotationDegrees: 0
+    height: 0
+  - archetype: 1
+    position: {x: 0.85, y: 0.3}
+    size: {x: 0.09, y: 0.1}
+    rotationDegrees: 0
+    height: 0
+  - archetype: 1
+    position: {x: 0.38, y: 0.84}
+    size: {x: 0.08, y: 0.08}
+    rotationDegrees: 0
+    height: 0
+  - archetype: 1
+    position: {x: 0.62, y: 0.84}
+    size: {x: 0.08, y: 0.08}
+    rotationDegrees: 0
+    height: 0
+  - archetype: 0
+    position: {x: 0.5, y: 0.88}
+    size: {x: 0.12, y: 0.04}
+    rotationDegrees: 0
+    height: 0
+  playerBasePosition: {x: 0.5, y: 0.08}
+  enemyBasePosition: {x: 0.5, y: 0.94}
+  startingResources: 4
+  playerBaseHealth: 14
+  enemyBaseHealth: 10
+  maxGarrisonUnits: 2
+  hasAICommander: 1
+  aiProfile: {fileID: 11400000, guid: 35b31d1ed1e0443c97f1ec298001bae6, type: 2}
+  parTimeSeconds: 180
+  parUnitsLost: 8

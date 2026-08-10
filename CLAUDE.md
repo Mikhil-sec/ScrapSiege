@@ -47,9 +47,9 @@ Full design detail is in `plan.md`. **Read it before starting work; it is the so
 - **adb** at `C:\Program Files\Unity\Hub\Editor\6000.5.6f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe`. **Use it.** Several bugs here were invisible in the Editor.
 - **`/deploy` skill** (`.claude/skills/deploy/`) — the build → install → launch → logcat loop.
 
-## Working agreement (set 2026-08-08)
+## Working agreement (set 2026-08-08, narrowed 2026-08-09)
 
-**The user runs builds and on-device tests themselves and reports back.** Do not build/install/launch unattended. Pull logs with adb *after* they report something, or if they explicitly ask for a deeper investigation over USB.
+**The boundary is the physical device, not the Editor.** The user only wants to personally do "Build and Run" to his Android device (on-device testing) and GitHub commits. Editor-only builds that don't touch the device — e.g. a release AAB via `Assets/Editor/BuildScript.cs` headed for Play Console — are fine to run unattended through Unity MCP. Pull logs with adb *after* they report something, or if they explicitly ask for a deeper investigation over USB.
 
 Useful log commands once they report an issue:
 ```
@@ -57,6 +57,54 @@ adb logcat -d -s Unity:E AndroidRuntime:E          # errors only
 adb logcat -d -s Unity:V | grep -A8 PlaneLock      # plane detection diagnostics
 adb logcat -d -s Unity:V | grep -iE "LevelBuilder|selected|Rally"
 ```
+
+## Security — read `SECURITY.md` before any monetization, signing or release work
+
+The repo is **public** and the app takes **real money**. `SECURITY.md` at the root is the standing
+checklist and the findings register from the 2026-08-08 full audit. The short version:
+
+- **Public RevenueCat SDK keys (`goog_`/`appl_`/`test_`) are meant to ship in the client and are fine in
+  this repo. A secret key (`sk_…`) must never touch it** — it lives in the MCP config outside the repo.
+  If one is ever committed, rotating it in the dashboard is mandatory; deleting the commit is not enough.
+- **Assume anything serialized into a scene is public.** Verified: the RevenueCat key is readable in
+  plaintext from `assets/bin/Data/level1` inside the APK. IL2CPP protects logic, not data.
+- **Release builds are now real** (fixed 2026-08-09): `Scrap Siege > Build Android APK (RELEASE - for
+  Play Store)` produces a signed, non-debuggable `build/ScrapSiege.aab`, and refuses to run at all
+  without a real upload keystore configured (`Assets/Editor/BuildScript.cs`). The plain
+  `(Development)` menu item is still debug-signed and debuggable on purpose, for adb testing.
+- **Signing passwords do not survive an Editor restart** in this Unity version — confirmed twice. After
+  reopening the Editor, re-apply `PlayerSettings.Android.keystorePass`/`keyaliasPass` before attempting a
+  release build, or it fails with a clear "No keystore passwords were found" exception (never a silent
+  fallback to debug signing). Password lives in a local credentials file outside the repo — see
+  `SECURITY.md` Finding 4 for the exact path and the reasoning.
+- **`ProjectSettings/ProjectSettings.asset` is tracked** — diff it after configuring signing, in case
+  Unity wrote a keystore password into it. That is the most likely way this project leaks a credential.
+  (Checked twice on 2026-08-09: it never does, in this Unity version — only
+  `AndroidKeystoreName`/`AndroidKeyaliasName`/`androidUseCustomKeystore` get written.)
+
+## Keeping context/token usage down (set 2026-08-09)
+
+Sessions in this project have been running past 150k tokens, mostly from long build/log output landing
+directly in the conversation. Concretely:
+
+- **Don't tail whole log files into the transcript.** Filter before reading: `Select-String -Pattern` in
+  PowerShell, `grep`/`tail -n` in Bash, not a bare `Get-Content -Tail 60` when you only need one line.
+  Editor.log build progress is especially verbose — grep for the terminal state (`Build Finished`,
+  `error CS`, `Exception`), not the whole scroll.
+- **Use `Monitor` for anything that takes minutes** (a release build is ~3–20 min depending on whether
+  IL2CPP artifacts are cached) instead of a foreground `Unity_RunCommand` call, which times out around
+  30 min of silence anyway and gives no partial output. Grep the log for a real completion signal — a
+  loose pattern like a bare `"Exception"` will false-positive on unrelated boilerplate text already in
+  the file; anchor on `Build Finished, Result:` or similar.
+- **Read only the file section you need.** Prefer `Grep`/targeted `Read` with `offset`/`limit` over
+  reading a whole large file (this project's memory files, `plan.md`, and `SECURITY.md` are all long).
+- **Hand off research-heavy digging to a subagent** (`Explore` for pure search, `general-purpose` for
+  multi-step investigation) when a task is about to mean reading many files just to answer one question —
+  only its summary needs to land in the main conversation.
+- **Prefer a fresh session at natural phase boundaries** (end of a feature, end of a security pass, end
+  of a monetization setup push) over continuing to pile work into one long session. Before ending one,
+  write the handoff into memory/`CLAUDE.md`/`plan.md` so the next session starts with full context
+  without re-deriving it from scratch — this file's dated "Current state" sections exist for exactly that.
 
 ## How to work in this project
 
@@ -192,3 +240,98 @@ card by `MainMenuController.PopulateCard`, so authoring the string is the whole 
 ### Still not built
 
 Star ratings, sound, board elevation, and submission assets.
+
+## Current state (2026-08-09, end of the security-fix + Play Console monetization session)
+
+**Scope:** fixed the three code/settings security findings that blocked a real Play upload, generated
+the upload keystore, produced and verified a real signed release build, and finished the RevenueCat side
+of the Play Store product. Full detail, findings register, and the exact verification commands are in
+`SECURITY.md` — this is the summary.
+
+**Done:**
+- Findings 1, 2, 5 (debug-signed builds, external install location, placeholder product name) fixed in
+  code/`ProjectSettings.asset`. Finding 4 (no keystore) resolved by generating one outside the repo.
+  Finding 3 (client-side entitlement flag) re-verified as still correctly accepted.
+- `Assets/Editor/BuildScript.cs` now has a real release path: `Scrap Siege > Build Android APK (RELEASE -
+  for Play Store)` builds `build/ScrapSiege.aab` (AAB, not APK — required for Play), refuses to run
+  without a real keystore, and is non-debuggable.
+- Built and **verified on the real artifact** (not just settings) with `bundletool build-apks` +
+  `apksigner verify --print-certs` + `aapt2 dump badging/xmltree`: real cert, not debuggable,
+  `internalOnly`, labeled `ScrapSiege`.
+- User created the `scrap_siege_pro`/`monthly` subscription in Play Console. Registered in RevenueCat as
+  `prod759b1f896f`, attached to entitlement `entl844b33dd6b` and package `pkgef5eaf57c5e`.
+- Swapped `MonetizationManager.revenueCatApiKey` in `Assets/Scenes/ARTest.unity` from the Test Store key
+  to the real Play Store key `goog_BPqxjAwHxIuYgSZXpVxbuhuaLbt`, rebuilt, reverified the key swap on the
+  artifact.
+- Working agreement narrowed: the boundary is the physical device, not the Editor — see the section
+  above. Unattended Editor-only builds through Unity MCP are fine; only device install/launch and git
+  commits stay manual.
+
+**Update (2026-08-09, versioning saga — three passes before landing):** first Internal Testing upload
+was rejected — "Version code 1 has already been used." Bumped `AndroidBundleVersionCode` 1→2, but
+`bundleVersion` (versionName) was still `0.1.0`, which reads as a downgrade — bumped to `0.2.0`. By then
+`versionCode=2` had also already been consumed by an upload attempt, so bumped once more to
+`versionCode=3` / `versionName=0.3.0` in lockstep. Reapplied signing passwords each rebuild (lost on
+Editor restart, as expected), reverified `versionCode='3'` / `versionName='0.3.0'` on the final artifact
+with `aapt2 dump badging`. `SECURITY.md` section B now has standing checklist items for both fields —
+**always bump `bundleVersionCode` and `bundleVersion` together**, and if a version code is ever rejected
+as "already used" even though nothing was knowingly uploaded with it, assume a prior attempt consumed it
+and move on rather than retrying the same number.
+
+**Not done — the next session's task queue:**
+1. Upload `build/ScrapSiege.aab` (versionCode=3, versionName 0.3.0) to Play Console Internal Testing.
+2. Add self as a license tester, accept the opt-in link on the test device.
+3. Real on-device purchase test, report back.
+4. If it works: mark the monetization submission requirement complete in `plan.md`'s checklist.
+5. If it fails: check RevenueCat offerings load first (`goog_` key + product propagation can take a few
+   hours after creation in Play Console — don't assume a bug immediately), then check `adb logcat` for
+   the actual Billing error.
+6. Housekeeping: the keystore credentials file at
+   `C:\Users\naika\keystores\scrapsiege-upload-key-CREDENTIALS.txt` still has the passwords in plaintext
+   — move them to a password manager and delete the file once signing is confirmed stable across at
+   least one more Editor restart + release build.
+
+See the assistant's `project_scrap_siege_monetization_handoff` memory for the same queue with more
+detail, kept in sync with this section.
+
+## Current state (2026-08-10, later session) — camera black-screen fixed and built; NOT yet device-confirmed
+
+**Root cause found for the "camera not working, black screen" report:** not the `GL_INVALID_ENUM`
+error the user saw (that fires 3 times at init, unrelated). The real cause, found by counting
+occurrences across the logcat buffer rather than eyeballing a snippet: ARCore's session gets stuck
+in an error state and **never calls `ArSession_resume`** (zero occurrences in two full app-run logs)
+because the manifest lacked `android.permission.HIGH_SAMPLING_RATE_SENSORS`, required for ARCore's
+IMU registration on apps targeting API 31+ (this one targets 36). With no resumed session the camera
+device is never opened, so every frame logs `camera was passed NULL` (16k+ times per run) and plane
+detection reports `planes=0` forever — indistinguishable on screen from "no good plane found," which
+may retroactively explain the older "AR plane detection is a weak point" finding. Full diagnostic
+detail in the assistant's `project_scrap_siege_unity_gotchas` memory.
+
+**Fix:** new `Assets/Editor/AndroidManifestPostProcessor.cs` injects the permission into the
+generated manifest post-build (same mechanism the ARCore XR plugin itself uses for CAMERA/INTERNET).
+Documented in `SECURITY.md` as a new, harmless, install-time permission — no new exposure.
+
+**Built and verified against real artifacts (2026-08-10), NOT yet run on a device:**
+- `build/ScrapSiege.aab` — release, versionCode=4/versionName=0.4.0, signer `CN=ScrapSiege`
+  (not debug), not debuggable, `internalOnly` install location, all 6 permissions present incl. the
+  new one. Verified via `bundletool build-apks` + `aapt2 dump badging/xmltree` +
+  `apksigner verify --print-certs`. **Not yet uploaded to Play Console.**
+- `build/ScrapSiege.apk` — dev, debug-signed as expected, same new permission present.
+  **Not yet installed/run on a device.**
+
+**Next session's actual task queue:**
+1. Install the dev APK, confirm the camera fix on-device (look for a live passthrough and
+   `ArSession_resume` in a fresh logcat — `planes > 0` alone isn't proof, could just be slow real
+   detection).
+2. Upload the versionCode=4 AAB to Play Console Internal Testing (bump both version fields together
+   if rejected as already-used, per the existing versioning lesson above).
+3. License tester + real purchase test, as before.
+4. Still unresolved, not investigated this session: `ARTest.unity`'s uncommitted diff collapses 26 of
+   28 UI `RectTransform`s to zero size/position. Likely a harmless stale editor snapshot under the
+   HUD's `LayoutGroup`s, but genuinely unverified — worth a look at the HUD on the next device test.
+5. Working keystore-password flow, confirmed end to end this session: set `SCRAPSIEGE_KEYSTORE_PASS`
+   as a Windows *User* env var, then if the Editor still can't see it, the fix is
+   `Stop-Process -Name explorer -Force` (auto-restarts) **and** fully quitting/relaunching Unity Hub
+   itself, not just the Editor window — full detail (including why) in the gotchas memory.
+6. Security scan of everything currently pending for commit is clean — safe to commit/push.
+   `.gitignore` hardened with explicit keystore/credential-file patterns as defense-in-depth.

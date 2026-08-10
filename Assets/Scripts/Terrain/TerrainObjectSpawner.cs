@@ -175,30 +175,95 @@ namespace ScrapSiege.Terrain
             }
         }
 
-        // One material per (archetype, role, Pro state) rather than one per spawned object. The old
-        // code allocated a fresh Material for every piece on every build and never released them,
-        // which leaked a little on each level restart.
+        // One material per (archetype, role) rather than one per spawned object. The old code
+        // allocated a fresh Material for every piece on every build and never released them, which
+        // leaked a little on each level restart.
+        //
+        // The Pro state is deliberately NOT part of this key. It used to be, which meant a purchase
+        // completed mid-match changed which cache entry *new* lookups landed on while every
+        // already-spawned renderer kept holding the free-palette material - so the one shipped Pro
+        // cosmetic silently did nothing until the player restarted into a fresh match. Keying on
+        // (archetype, role) alone means there is exactly one material per slot for the lifetime of
+        // the board, and switching palette is just recolouring those materials in place - every
+        // renderer already points at them, so the whole board repaints on the same frame.
         private readonly System.Collections.Generic.Dictionary<int, Material> materialCache
             = new System.Collections.Generic.Dictionary<int, Material>();
 
+        // The primitive fallback path (SpawnFromPrimitive) instances its own material per object
+        // rather than going through the cache, so those are tracked separately - with the archetype
+        // that decides their colour - to be repainted and released alongside it.
+        private struct PrimitiveMaterial
+        {
+            public Material Material;
+            public TerrainArchetype Archetype;
+        }
+
+        private readonly System.Collections.Generic.List<PrimitiveMaterial> primitiveMaterials
+            = new System.Collections.Generic.List<PrimitiveMaterial>();
+
+        private const int RoleStride = 8;
+
         private Material MaterialFor(TerrainArchetype archetype, MaterialSlots.Role role)
         {
-            int key = ((int)archetype * 8 + (int)role) * 2 + (ProEntitlement.IsUnlocked ? 1 : 0);
+            int key = (int)archetype * RoleStride + (int)role;
             if (materialCache.TryGetValue(key, out var cached) && cached != null) return cached;
 
-            var created = new Material(baseMaterial)
-            {
-                color = MaterialSlots.ColorForRole(role, ColorForArchetype(archetype))
-            };
+            var created = new Material(baseMaterial) { color = ColorForCacheKey(key) };
             materialCache[key] = created;
             return created;
         }
 
+        private static Color ColorForCacheKey(int key)
+        {
+            var archetype = (TerrainArchetype)(key / RoleStride);
+            var role = (MaterialSlots.Role)(key % RoleStride);
+            return MaterialSlots.ColorForRole(role, ColorForArchetype(archetype));
+        }
+
+        private void OnEnable()
+        {
+            ProEntitlement.Changed += OnProEntitlementChanged;
+        }
+
+        private void OnDisable()
+        {
+            ProEntitlement.Changed -= OnProEntitlementChanged;
+        }
+
+        /// <summary>
+        /// Repaints every material this spawner owns when the Pro entitlement flips, so a purchase
+        /// (or a restore, or an expiry) is visible immediately on the board the player is looking at
+        /// instead of only on the next match. Cheap: one colour write per (archetype, role) slot,
+        /// not per spawned object.
+        /// </summary>
+        private void OnProEntitlementChanged(bool unlocked)
+        {
+            foreach (var entry in materialCache)
+                if (entry.Value != null) entry.Value.color = ColorForCacheKey(entry.Key);
+
+            // Primitive-path objects are single-slot, so they take the body colour directly.
+            // Iterated backwards so destroyed entries can be dropped in the same pass.
+            for (int i = primitiveMaterials.Count - 1; i >= 0; i--)
+            {
+                var entry = primitiveMaterials[i];
+                if (entry.Material == null) primitiveMaterials.RemoveAt(i);
+                else entry.Material.color = ColorForArchetype(entry.Archetype);
+            }
+
+            Debug.Log($"TerrainObjectSpawner: Pro entitlement {(unlocked ? "unlocked" : "lost")} - repainted {materialCache.Count} cached and {primitiveMaterials.Count} primitive material(s).");
+        }
+
         private void OnDestroy()
         {
+            ProEntitlement.Changed -= OnProEntitlementChanged;
+
             foreach (var material in materialCache.Values)
                 if (material != null) Destroy(material);
             materialCache.Clear();
+
+            foreach (var entry in primitiveMaterials)
+                if (entry.Material != null) Destroy(entry.Material);
+            primitiveMaterials.Clear();
         }
 
         /// <summary>
@@ -277,6 +342,10 @@ namespace ScrapSiege.Terrain
                 var material = new Material(baseMaterial);
                 material.color = ColorForArchetype(data.Archetype);
                 renderer.material = material;
+
+                // Tracked so a Pro entitlement change repaints (and OnDestroy releases) it, the
+                // same as the cached model-path materials.
+                primitiveMaterials.Add(new PrimitiveMaterial { Material = material, Archetype = data.Archetype });
             }
 
             if (data.Archetype == TerrainArchetype.RubbleCover || data.Archetype == TerrainArchetype.WallBarricade)

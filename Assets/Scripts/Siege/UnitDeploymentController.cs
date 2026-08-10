@@ -123,6 +123,10 @@ namespace ScrapSiege.Siege
 
             if (!resourceEconomy.TrySpend(unitCost)) return;
 
+            // After TrySpend, so the sound only fires on a deploy that actually happened - a tap
+            // the player cannot afford should stay silent rather than sounding successful.
+            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.Deploy);
+
             var unit = Instantiate(unitPrefab, navHit.position, Quaternion.identity);
             var siegeUnit = unit.GetComponent<SiegeUnit>();
 
