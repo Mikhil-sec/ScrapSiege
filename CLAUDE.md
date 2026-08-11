@@ -335,3 +335,286 @@ Documented in `SECURITY.md` as a new, harmless, install-time permission — no n
    itself, not just the Editor window — full detail (including why) in the gotchas memory.
 6. Security scan of everything currently pending for commit is clean — safe to commit/push.
    `.gitignore` hardened with explicit keystore/credential-file patterns as defense-in-depth.
+
+## Current state (2026-08-10, evening) — first Play-installed build tested; three separate bugs found
+
+The user installed **versionCode 4 / 0.4.0 from Play (Internal Testing)** on the Tab S6 Lite and made a
+**real Google Play subscription purchase**. Google charged and the subscription is live on Google's side.
+It then behaved as three separate faults, which are three *unrelated* root causes — do not treat them as
+one monetization bug.
+
+### 1. The camera/ARCore fix WORKED — confirm this before re-debugging it
+
+`vio_estimator.cc ... Successful initialization`, `pose_manager.cc ... World pose node changing`,
+`[LatestPoseTracker] Received first vio state` all present, and `camera was passed NULL` is down from
+16k+ per run to **28 total**. `HIGH_SAMPLING_RATE_SENSORS` is declared *and* `granted=true` on the
+installed package. **The ARCore session now resumes and tracks. That item is closed.**
+
+### 2. "Deploying stops working after subscribing" — NOT caused by the purchase
+
+Root cause: **`UnitDeploymentController` required a `PlaneWithinPolygon` AR raycast hit, while
+`BoardPlacementController` accepts `PlaneWithinPolygon | PlaneEstimated | FeaturePoint`.** ARCore tracks
+fine on this device but had **`planes=0` in all 16 `[PlaneLock]` diagnostics across the entire logcat
+buffer** — it never promoted anything to a plane. So the board places happily off feature points, the
+match starts, and then *every deploy tap is silently discarded forever*. No restart can help; no plane
+ever appears. Corroborating evidence: **zero `EnemyBase: took` lines in the whole buffer** — no player
+unit has ever reached the enemy base in any run.
+
+The purchase looked causal only because the timeline was tight: board built 15:50:34 → Go Pro tapped
+15:50:39 → purchase returned 15:50:50 → base dead 15:51:45 with no deploys. There was never a working
+deploy to lose.
+
+**Fixed:** deploy taps now intersect the **board's own transform plane** (`LevelMatchController.BoardRoot`,
+new property) and are clamped to the board rectangle via `InverseTransformPoint` (local |x|,|z| <= 0.5).
+No ARCore plane and no Collider involved — the slab deliberately has no Collider, so `Physics.Raycast`
+was not an option. The AR raycast remains as the fallback for the legacy scan/Fortify path only. Taps
+outside the board are now rejected on purpose (units deploy onto the board, not onto bare table).
+**Every rejection path now logs (throttled, `[Deploy] tap ignored - ...`)** — "I tap and nothing happens"
+previously produced not one line of log, which is why this survived so long.
+
+### 3. Pro features not unlocking + Google cancelling the subscription — ONE cause, and it is dashboard-side
+
+**RevenueCat has no Google Play service account credentials.** Three independent confirmations:
+- logcat: `PurchasesError(code=InvalidCredentialsError, underlyingErrorMessage=Invalid Play Store
+  credentials.)` on every `POST https://api.revenuecat.com/v1/receipts`
+- MCP `get-product-store-state` → HTTP 422 `"Missing credentials for the store."`
+- MCP audit log: `app_created ... credentials_provided: false`, with **no** later credential update
+- and the ledger agrees: 0 active subscriptions, $0 revenue, 10 customers, **no transactions at all**
+
+Consequences, both of the user's remaining symptoms:
+- RevenueCat cannot validate the purchase token → no entitlement → no PRO ACTIVE badge and level 05
+  stays locked. **The menu/entitlement code is fine** — `MainMenuController` subscribes to
+  `ProEntitlement.Changed` correctly and every Inspector reference in `MainMenu.unity` is wired.
+- RevenueCat cannot **acknowledge** the purchase, and Google Play auto-refunds and revokes any purchase
+  unacknowledged within 3 days. That is exactly the "it got cancelled even though I used the app" report.
+- Follow-on: every later Subscribe tap now fails `ITEM_ALREADY_OWNED` / `ProductAlreadyPurchasedError`,
+  because Google already has the subscription.
+
+**Only the user can fix this** — it is Google Cloud + Play Console + the RevenueCat dashboard. The
+RevenueCat MCP's `update-app` play_store body accepts `package_name` and nothing else, so there is no
+API path for credentials. Steps: create a GCP service account with the Android Publisher API enabled,
+grant it access in Play Console, download the JSON key, upload it at **RevenueCat > Project Settings >
+Google Play App Settings > Service account credentials**. **Newly created credentials can take up to 36
+hours to become valid** — `Invalid Play Store credentials` during that window is expected, not a
+regression.
+
+### Client-side fixes made in the same pass
+
+- **`autoSyncPurchases` was silently OFF in every build.** `MonetizationManager` calls
+  `purchases.Configure(config)` with a `PurchasesConfiguration.Builder` config, which **bypasses every
+  Inspector field** (they only feed `Purchases.Start()`'s auto-configure path, which `useRuntimeSetup`
+  disables). `Builder.Build()` does `_dangerousSettings ?? new DangerousSettings(false)` — auto-sync
+  **false**, the opposite of the component's own default of true. The SDK said so on every launch
+  ("⚠️ Automatic syncing of purchases has been disabled") and it went unread for the feature's whole
+  life. Now set explicitly via `SetDangerousSettings(new Purchases.DangerousSettings(true))`.
+  **General rule: if it is passed to `Configure()`, the Inspector value is decoration.**
+- **`MonetizationManager.OnApplicationFocus`** now refreshes customer info on resume. The Play purchase
+  flow is a separate activity (`ProxyBillingActivity`), so every purchase — and every subscribe/cancel
+  done in the Play Store app — is bracketed by a pause/resume that the app previously ignored entirely.
+- **`MonetizationManager.SyncPurchases()`** added as the recovery path for a purchase the store has but
+  RevenueCat does not.
+- **`PaywallController` now recovers from `ProductAlreadyPurchasedError`** by calling `SyncPurchases`
+  instead of showing the player "This product is already active for the user" — which, to someone who is
+  being charged and has nothing, reads as a taunt. `MonetizationManager.Purchase`'s callback signature
+  gained the readable error code for this (`Action<bool, string, string>`).
+
+**Not yet device-tested:** all of the above. Built and compile-verified only (both `ScrapSiege.Runtime`
+and `Assembly-CSharp` build clean).
+
+## 2026-08-10 (later) — 0.4.0 device test results: 2 new bugs found, RevenueCat credit status unclear
+
+**Important scoping note:** the device test that produced these findings ran the **0.4.0 build**, which
+predates the three code fixes above (autosync, `OnApplicationFocus`, `SyncPurchases`, plus the deploy
+raycast fix and the paywall `ProductAlreadyPurchasedError` recovery). None of those fixes have been
+device-tested yet. The findings below are new, on top of them.
+
+**Good news:** no obvious new bugs beyond the two listed. The main-menu Pro Active badge swap works
+correctly on device.
+
+### New bug A — the in-match "Go Pro" button never reflects Pro state
+
+`MainMenuController` (main menu scene) correctly subscribes to `ProEntitlement.Changed` and swaps
+`goProButton`/`proActiveBadge`. The **match scene's own `GoProButton`** (`Assets/Scenes/ARTest.unity`,
+object `GoProButton`, opens `PaywallPanel`) has **no controller doing the equivalent** —
+`Assets/Scripts/UI/HudController.cs` has zero references to `ProEntitlement` or Pro state at all. So a
+Pro user still sees "Go Pro" during gameplay even though they already own it. Needs the same pattern as
+`MainMenuController.ApplyProState()`: subscribe in `OnEnable`, hide the button (or swap to a badge) when
+`ProEntitlement.IsUnlocked`, unsubscribe in `OnDisable`.
+
+### New bug B — the paywall's feature list is stale copy, hardcoded in the scene
+
+`Assets/Scenes/ARTest.unity` line ~6662, a static (non-code-driven) TMP_Text under `PaywallPanel`,
+literally reads:
+```
+■ Saturated terrain palette
+■ More cosmetic board themes
+■ Extra visual effect packs
+```
+This is old marketing copy from before level 05 "The Foundry" and the Veteran AI tier existed as real
+Pro perks (see `project_scrap_siege_monetization_handoff` memory, "FIXED 2026-08-10" section — that pass
+built the actual Pro-only level and repaint-on-purchase, but never went back to update what the paywall
+*promises*). Only the palette line is real; "more cosmetic board themes" and "extra visual effect packs"
+were **never built** — confirmed by search, no such systems exist anywhere in the codebase. Two options,
+not decided yet:
+1. Rewrite the copy to what's actually shipped: saturated palette + level 05 "The Foundry" (harder,
+   Veteran-tier AI — confirmed via `05_TheFoundry.asset:aiProfile` pointing at `AIProfile_Veteran.asset`,
+   so "harder AI" is already naturally Pro-gated through the level, no separate gate needed) + Veteran AI.
+2. Or actually build board themes / effect packs to match the existing promise (bigger scope, probably
+   wrong call this close to submission).
+**Recommendation for next session: option 1** — the promise should describe what ships, and level 05 +
+Veteran AI is a perfectly good value prop that's just never been *written down* anywhere the player sees.
+
+### Unresolved — is RevenueCat actually receiving purchase data at all?
+
+User noticed the RevenueCat sandbox customer list still shows only one customer with a purchase, dated
+to a build a day old (i.e. from before 0.4.0). Two explanations, not yet distinguished:
+- Expected and boring: **the missing Google Play service account credentials** (see the "evening" section
+  above — `InvalidCredentialsError` on every receipt POST) mean 0.4.0's purchase attempt(s) never landed
+  as valid transactions either, consistent with everything already known.
+- Or: something is still wrong even once credentials are fixed, worth a fresh look with `list-customers` /
+  `list-customer-events` / `get-customer` on the specific test account, and cross-referencing against a
+  fresh on-device purchase attempt's timestamp.
+**Next session: check this via RevenueCat MCP once credentials are confirmed uploaded** — don't assume
+it's "just" the credentials issue without checking, since a second independent bug at this stage would be
+easy to miss if we stop looking after finding the first one.
+
+## Next session task queue (as of 2026-08-10 late evening) — READ THIS FIRST
+
+1. **User action (dashboard, not code):** upload Google Play service account credentials to RevenueCat
+   (Project Settings > Google Play App Settings). This is the root cause of Pro not unlocking and of the
+   subscription being auto-cancelled by Google. Confirm this got done before assuming anything else is
+   broken. Allow up to 36h to propagate.
+2. **Fix new bug A**: wire the in-match `GoProButton`/badge to `ProEntitlement.Changed`, same pattern as
+   `MainMenuController.ApplyProState()`. Small, isolated change to `HudController.cs` or a new small
+   component alongside it.
+3. **Fix new bug B**: rewrite the paywall's feature-list copy in `ARTest.unity` (~line 6662) to describe
+   what's actually shipped (saturated palette, level 05 "The Foundry", Veteran-tier AI) rather than
+   unbuilt cosmetic promises. Simple text edit, but it's in a scene file, not a script — verify with
+   `Unity_RunCommand` or a targeted YAML read, not by inspecting a script.
+4. **Build a new dev APK** including the four code fixes from the "evening" session (autosync, focus
+   refresh, SyncPurchases, deploy raycast fix, paywall already-owned recovery) plus bugs A and B above —
+   install and device-test all of it together once credentials are confirmed live, since Pro-gated
+   content can't be meaningfully tested without a real entitlement.
+5. **Check RevenueCat MCP for whether purchase data is actually flowing** post-credentials-fix — see
+   "Unresolved" section above. Use `list-customers`/`get-customer`/`list-customer-events` against the
+   test device's `$RCAnonymousID` or the newly-identified user, correlated to a fresh purchase timestamp.
+6. Everything else from the "evening" section's queue (SECURITY.md commit, keystore file cleanup) is
+   still pending and lower priority than the above.
+
+**Uncommitted as of this writing** (not pushed, per the working agreement — commits are the user's call):
+`Assets/Monetization/MonetizationManager.cs`, `Assets/Monetization/PaywallController.cs`,
+`Assets/Scripts/Levels/LevelMatchController.cs`, `Assets/Scripts/Siege/UnitDeploymentController.cs`,
+`CLAUDE.md`. Both `ScrapSiege.Runtime` and `Assembly-CSharp` compile clean as of the last check.
+
+## 2026-08-10 (fresh session) — credentials confirmed live, bugs A/B fixed, dev APK rebuilt, IAP requirement re-opened
+
+**Credentials confirmed live via RevenueCat MCP, not just assumed done:** audit log shows
+`appa37d9670f8`'s `credentials_provided` flipped `false → true` at `2026-08-10T13:33:43Z`, and
+`get-product-store-state` for `prod759b1f896f` now returns `status: "ok"` (was a 422 "Missing
+credentials for the store"). Only ~3 hours old at the time of this check — still inside the "allow up
+to 36h" propagation window from the "evening" section above.
+
+**Checked whether purchase data is flowing — confirmed it is not, and confirmed why.** Pulled all 10
+customers this project has ever seen (`list-customers`, no pagination needed) and checked
+`list-customer-events` / `get-customer` / `list-subscriptions` for each: **zero purchases,
+subscriptions, entitlements, or events exist anywhere in this project's history**, including for the
+customer that made the real Google-charged purchase in the "evening" session. This independently
+confirms that purchase never reached RevenueCat as a valid receipt — not a second bug, just
+confirmation of the known one. No purchase attempt has happened since credentials went live.
+
+**Time-sensitive:** Google auto-revokes an unacknowledged purchase after 3 days; that clock started on
+the original evening purchase. Only a fresh receipt — a new purchase, or the client's own
+`SyncPurchases()` resending the existing token — can save it now that credentials work.
+`SyncPurchases()` was written in the "evening" session but wasn't in any built APK until now —
+installing and opening the fresh build promptly gives that old subscription a chance to be
+acknowledged before Google auto-refunds it.
+
+**Fixed bug A** (in-match Go Pro button never updated): `HudController.cs` gained a `goProButton`
+field, subscribes to `ProEntitlement.Changed` in `OnEnable`/unsubscribes in `OnDisable` (same pattern
+as `MainMenuController.ApplyProState`), and hides the button once Pro is active. Wired in
+`ARTest.unity`'s `HudController` component to the existing `GoProButton` object — no new UI object
+needed. There's no separate in-match "Pro Active" badge (unlike the main menu); out of scope here.
+
+**Fixed bug B** (stale paywall copy): the feature list in `ARTest.unity` (~line 6663) now reads
+"Saturated terrain palette / Level 05: The Foundry / Veteran-tier AI challenge" instead of the unbuilt
+"more board themes / effect packs" promises.
+
+**Rebuilt the dev APK** with all six pending fixes (the four from "evening" + bugs A/B): via
+`Unity_RunCommand` → `BuildScript.BuildAndroidFromEditor(development: true)` →
+**`build\ScrapSiege.apk`, 164 MB, 0 errors, 5 pre-existing unrelated warnings**, confirmed freshly
+built (`2026-08-10 19:46` file timestamp). Editor-only, done unattended per the working agreement —
+**not installed to the device**, that's the user's step.
+
+**Corrected a stale memory:** [[project_scrap_siege_shipaton_readiness]] had claimed the IAP entry
+requirement was "✅ CLEARED" based on an entitlement "returning active" that, per the zero-purchases
+finding above, never actually happened. Corrected in place — **the entry requirement is still open**,
+pending a real post-credentials purchase.
+
+**Next-session queue:**
+1. User installs `build/ScrapSiege.apk`, does a fresh on-device purchase test (or lets
+   `SyncPurchases`/autosync recover the old one).
+2. Re-check RevenueCat MCP the same way as this session for a real `gives_access: true` subscription.
+   Only then mark the entry requirement cleared.
+3. If still `InvalidCredentialsError` and under 36h since the credential upload, that's expected —
+   wait rather than re-diagnosing.
+4. Everything else (SECURITY.md commit, keystore cleanup) unchanged, lower priority.
+
+**User's explicit instruction this session:** the AR demo video is recorded last, only once the
+product is final — do not suggest or schedule it mid-timeline.
+
+## 2026-08-10 (same session, later) — version bumped to 0.5.0, release AAB built, auto-bump automation added
+
+User wants to push a new Play Console Internal Testing release and asked for automatic version
+bumping going forward, since forgetting this caused the versionCode=1→2→3 "already used" churn
+documented earlier in this file. Version was still 0.4.0 / versionCode 4 (the already-uploaded one).
+
+**Bumped to 0.5.0 / versionCode 5** (`PlayerSettings.bundleVersion` / `PlayerSettings.Android.
+bundleVersionCode`, via `Unity_RunCommand`, then `AssetDatabase.SaveAssets()`).
+
+**Added automatic version-bumping to `Assets/Editor/BuildScript.cs`**: `RunBuild`'s release path now
+calls a new `BumpVersionForNextRelease()` after every *successful* release-AAB build, which increments
+the patch digit and `bundleVersionCode` by 1 and saves. Deliberately fires *after* the build, not
+before, so the artifact just produced keeps the version it was asked for and only the *next* build
+starts pre-bumped. Minor/major bumps (like this session's 0.4.0→0.5.0) stay a manual judgment call —
+only the automatic, mechanical part (never colliding with a version Play has already seen) is
+automated. If `bundleVersion` isn't in `major.minor.patch` form, it logs a warning and skips rather
+than guessing.
+
+**Built the release AAB**: `build/ScrapSiege.aab`, 39 MB, 0 errors, 5 pre-existing unrelated warnings.
+Keystore passwords were re-applied first via `BuildScript.ApplyKeystorePasswordsFromEnvironment()`
+(needed after every Editor restart, per the existing keystore-password lesson). **Verified directly
+against the artifact, not just Editor settings**, using `bundletool dump manifest` (found at
+`.../PlaybackEngines/AndroidPlayer/Tools/bundletool-all-1.17.2.jar` — `aapt2 dump badging` doesn't
+understand the `.aab` container format, only bare APKs, so bundletool is the right tool for this format
+specifically): confirms `versionCode="5"`, `versionName="0.5.0"`, package
+`com.mikhilnaika.scrapsiege`. As a side effect of the new automation, **`PlayerSettings` now reads
+0.5.1 / versionCode 6** — that is intentional, ready for whatever gets built next, and does not affect
+the 0.5.0/5 artifact already sitting in `build/`.
+
+**Not done by me**: uploading `build/ScrapSiege.aab` to Play Console Internal Testing — that's a
+dashboard action with no MCP path, same as every previous release, and stays the user's step.
+
+## ✅ 2026-08-11 — monetization phase closed: 0.5.0 tested, Pro confirmed unlocking, transactions flowing
+
+User uploaded `build/ScrapSiege.aab` (0.5.0/versionCode 5) to Play Internal Testing, tested it, and
+**saw Pro visibly unlock in-game (PRO ACTIVE badge, Level 05 available)** — not just a dashboard
+transaction. Independently verified via RevenueCat MCP: `list-subscriptions` on the test customer
+(`$RCAnonymousID:282e5b06bb1849dc8752b8d24e34ee1e`) shows three real sandbox purchases of
+`prod759b1f896f` landing successfully in the hours around the test.
+
+**Worth remembering for next time this needs checking:** each of those subscriptions now reads
+`gives_access: false` / `status: expired` with an empty `entitlements` list — that looks like a
+failure but isn't. Play's license-tester sandbox compresses a monthly subscription's renewal/expiry
+cycle to ~5-minute windows for testing, so *any* sandbox purchase reads "expired" shortly after,
+working or not. Don't re-diagnose this as a bug from `list-subscriptions` alone; corroborate with
+either a fresh purchase checked immediately, or the user's own in-game observation.
+
+**This closes the whole monetization arc** that ran from 2026-08-09 (Play Console/RevenueCat setup)
+through the credentials saga (2026-08-10) to this confirmation. The IAP entry requirement for
+Shipaton 2026 is genuinely met. Full detail in [[project_scrap_siege_monetization_handoff]] (now
+closed/historical) and [[project_scrap_siege_shipaton_readiness]] (current status) — read those, not
+this file's older sections, for where things stand.
+
+**User's plan from here:** start a fresh session and reassess what's left from there. Known remaining
+work per [[project_scrap_siege_shipaton_readiness]]: AI tuning, on-device sound verification, content
+depth, and — deliberately last, only once the product is final — the demo video.

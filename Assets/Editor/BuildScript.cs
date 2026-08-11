@@ -202,7 +202,18 @@ namespace ScrapSiege.EditorTools
             // the Android debug certificate (which is all adb install needs), then restore the
             // setting so ProjectSettings.asset is left byte-identical for the next release build.
             if (!development)
-                return BuildPipeline.BuildPlayer(options);
+            {
+                BuildReport releaseReport = BuildPipeline.BuildPlayer(options);
+
+                // Every prior "already used" rejection from Play traced back to a human forgetting
+                // to bump the version before the next release. Bumping right after a successful
+                // build - not before - means this build's artifact keeps the version it was asked
+                // for, while whatever gets built next automatically starts from an unused one.
+                if (releaseReport.summary.result == BuildResult.Succeeded)
+                    BumpVersionForNextRelease();
+
+                return releaseReport;
+            }
 
             bool restoreCustomKeystore = PlayerSettings.Android.useCustomKeystore;
             try
@@ -221,6 +232,35 @@ namespace ScrapSiege.EditorTools
                 // trips its own "no keystore configured" guard after an Editor crash.
                 AssetDatabase.SaveAssets();
             }
+        }
+
+        /// <summary>
+        /// Auto-increments the patch version and version code after every successful release
+        /// build, so the next "significant change" build never collides with a version Play has
+        /// already seen. Minor/major bumps (e.g. 0.4.0 -> 0.5.0) stay a human judgment call about
+        /// how significant the change is - only the patch digit and version code move on their own.
+        /// </summary>
+        private static void BumpVersionForNextRelease()
+        {
+            int oldCode = PlayerSettings.Android.bundleVersionCode;
+            string oldVersion = PlayerSettings.bundleVersion;
+
+            string[] parts = oldVersion.Split('.');
+            if (parts.Length != 3 || !int.TryParse(parts[2], out int patch))
+            {
+                Debug.LogWarning(
+                    $"[BuildScript] bundleVersion '{oldVersion}' isn't in major.minor.patch form - " +
+                    "skipping the automatic version bump. Bump it manually before the next release.");
+                return;
+            }
+
+            PlayerSettings.bundleVersion = $"{parts[0]}.{parts[1]}.{patch + 1}";
+            PlayerSettings.Android.bundleVersionCode = oldCode + 1;
+            AssetDatabase.SaveAssets();
+
+            Debug.Log(
+                $"[BuildScript] This build is {oldVersion} (code {oldCode}). Auto-bumped for the " +
+                $"NEXT release to {PlayerSettings.bundleVersion} (code {PlayerSettings.Android.bundleVersionCode}).");
         }
 
         /// <summary>

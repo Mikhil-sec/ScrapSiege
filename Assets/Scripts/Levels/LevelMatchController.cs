@@ -58,6 +58,14 @@ namespace ScrapSiege.Levels
         public float BoardLength => placement != null && placement.BoardRoot != null
             ? placement.BoardRoot.localScale.z
             : 0f;
+
+        /// <summary>
+        /// The placed board's transform, or null before placement. Its local X/Z span one board
+        /// width/length and its `up` is the table's normal, so a screen ray can be intersected
+        /// against the board directly - no ARCore plane, and no collider, required.
+        /// </summary>
+        public Transform BoardRoot => placement != null ? placement.BoardRoot : null;
+
         public Transform EnemyBase => builder != null ? builder.EnemyBase : null;
         public BaseHealth EnemyBaseHealth => builder != null ? builder.EnemyBaseHealth : null;
 

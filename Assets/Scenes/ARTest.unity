@@ -3239,6 +3239,7 @@ MonoBehaviour:
   outcomeTitle: {fileID: 2130375170}
   outcomeBody: {fileID: 1153672039}
   panelFadeSpeed: 9
+  goProButton: {fileID: 1678703376}
 --- !u!114 &718865083
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6659,9 +6660,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "<color=#FF8A3D>\u25A0</color>  Saturated terrain palette\n<color=#FF8A3D>\u25A0</color> 
-    More cosmetic board themes\n<color=#FF8A3D>\u25A0</color>  Extra visual effect
-    packs"
+  m_text: "<color=#FF8A3D>\u25A0</color>  Saturated terrain palette\n<color=#FF8A3D>\u25A0</color>  Level 05: The Foundry\n<color=#FF8A3D>\u25A0</color>  Veteran-tier AI challenge"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}

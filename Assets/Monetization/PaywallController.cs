@@ -86,18 +86,42 @@ public class PaywallController : MonoBehaviour
         if (subscribeButton != null) subscribeButton.interactable = false;
         SetStatus("Processing...");
 
-        manager.Purchase(monthlyPackage, (success, error) =>
+        manager.Purchase(monthlyPackage, (success, error, errorCode) =>
         {
             if (success)
             {
                 SetStatus("Unlocked!");
                 if (paywallRoot != null) paywallRoot.SetActive(false);
+                return;
             }
-            else
+
+            // Google Play refuses a second purchase of a subscription the account already owns
+            // (ITEM_ALREADY_OWNED). Reaching this means the store and RevenueCat disagree: the
+            // player is paying but has no entitlement, and the raw error - "This product is
+            // already active for the user" - reads as a taunt. Nothing the player can do fixes
+            // it, so recover on their behalf by pushing the store's own record up to RevenueCat.
+            if (errorCode == MonetizationManager.ProductAlreadyPurchasedErrorCode)
             {
-                SetStatus(error ?? "Purchase failed.");
-                if (subscribeButton != null) subscribeButton.interactable = true;
+                SetStatus("Already subscribed - restoring...");
+                manager.SyncPurchases((syncOk, syncError) =>
+                {
+                    if (syncOk && ScrapSiege.Monetization.ProEntitlement.IsUnlocked)
+                    {
+                        SetStatus("Unlocked!");
+                        if (paywallRoot != null) paywallRoot.SetActive(false);
+                        return;
+                    }
+
+                    // Sync "succeeded" but the entitlement is still dark, or it failed outright.
+                    // Either way the break is on the store/dashboard side, not in this session.
+                    SetStatus("Subscription active on Google Play but not verified yet. Try again shortly.");
+                    if (subscribeButton != null) subscribeButton.interactable = true;
+                });
+                return;
             }
+
+            SetStatus(error ?? "Purchase failed.");
+            if (subscribeButton != null) subscribeButton.interactable = true;
         });
     }
 

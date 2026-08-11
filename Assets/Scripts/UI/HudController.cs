@@ -2,6 +2,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using ScrapSiege.AR;
+using ScrapSiege.Monetization;
 using ScrapSiege.Siege;
 using ScrapSiege.Terrain;
 using ScrapSiege.Vantage;
@@ -97,6 +98,11 @@ namespace ScrapSiege.UI
         [Header("Motion")]
         [SerializeField] private float panelFadeSpeed = 9f;
 
+        [Header("Monetization")]
+        [Tooltip("The in-match Go Pro button, hidden once Pro is active - offering an upgrade the " +
+                 "player already owns reads as a bug. Same pattern as MainMenuController.ApplyProState.")]
+        [SerializeField] private GameObject goProButton;
+
         private Phase phase = Phase.Scan;
         private bool deleteMode;
 
@@ -158,6 +164,8 @@ namespace ScrapSiege.UI
                 levelMatch.OnLevelLoaded.AddListener(HandleLevelLoaded);
                 levelMatch.OnSiegeStarted.AddListener(HandleSiegeStarted);
             }
+
+            ProEntitlement.Changed += OnProEntitlementChanged;
         }
 
         private void OnDisable()
@@ -209,6 +217,8 @@ namespace ScrapSiege.UI
                 levelMatch.OnLevelLoaded.RemoveListener(HandleLevelLoaded);
                 levelMatch.OnSiegeStarted.RemoveListener(HandleSiegeStarted);
             }
+
+            ProEntitlement.Changed -= OnProEntitlementChanged;
         }
 
         private void Start()
@@ -227,6 +237,8 @@ namespace ScrapSiege.UI
             // happened to move. Drive the opening state explicitly instead.
             HandleVantageChanged(vantage != null ? vantage.Vantage01 : 0f);
             HandleRallyAvailabilityChanged(vantage != null && vantage.IsRallyReady);
+
+            ApplyProState();
 
             SnapPanelAlphas();
         }
@@ -488,6 +500,22 @@ namespace ScrapSiege.UI
         {
             var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
             UnityEngine.SceneManagement.SceneManager.LoadScene(active.buildIndex);
+        }
+
+        // --- Monetization -------------------------------------------------------------------
+
+        /// <summary>
+        /// Purchase can complete mid-match, and the player is looking at the HUD, not the main
+        /// menu, when it does - same reasoning as MainMenuController.OnProEntitlementChanged.
+        /// </summary>
+        private void OnProEntitlementChanged(bool unlocked)
+        {
+            ApplyProState();
+        }
+
+        private void ApplyProState()
+        {
+            if (goProButton != null) goProButton.SetActive(!ProEntitlement.IsUnlocked);
         }
 
         // --- Shared -----------------------------------------------------------------------
