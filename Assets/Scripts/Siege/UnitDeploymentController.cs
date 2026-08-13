@@ -51,8 +51,36 @@ namespace ScrapSiege.Siege
                  "over siegePhase's dummy base.")]
         [SerializeField] private ScrapSiege.Levels.LevelMatchController levelMatch;
 
+        [Tooltip("The Rally order. Assigned so a tap that is placing a rally point cannot ALSO be " +
+                 "read as a deploy - both components poll the same touch from their own Update.")]
+        [SerializeField] private RallyController rallyController;
+
         [SerializeField] private GameObject unitPrefab;
+
+        [Tooltip("Fallback cost, used only when no unit class is selected (the legacy scan/Fortify " +
+                 "path). Every class carries its own cost.")]
         [SerializeField] private int unitCost = 1;
+
+        [Header("Unit classes")]
+        [Tooltip("The deployable roster. When assigned, the selected class decides cost, stats and " +
+                 "silhouette; leave it null to keep the single-unit behaviour the scan flow uses.")]
+        [SerializeField] private UnitRoster roster;
+
+        [Header("Line of sight (plan.md Mechanic 2)")]
+        [Tooltip("Refuse to deploy onto a point the player cannot actually see from where they are " +
+                 "standing. This is the strongest single lever the game has for making the AR real: " +
+                 "with it on, opening a route means physically moving until you can see the ground " +
+                 "you want to put someone on, and tall terrain becomes a wall you must walk around " +
+                 "rather than a texture you look over. Turn it off to fall back to deploy-anywhere.")]
+        [SerializeField] private bool requireLineOfSight = true;
+
+        [Tooltip("Which layers block a deploy sightline. Must match LineOfSightController's mask or " +
+                 "the reticle and the rule will disagree with each other.")]
+        [SerializeField] private LayerMask sightBlockerMask = 1 << ScrapSiege.Core.SiegeLayers.TerrainOccluder;
+
+        [Tooltip("Ignore blockers this close to the camera, so the player's own held position " +
+                 "clipping a wall does not black out the whole board. Real metres.")]
+        [SerializeField] private float sightNearClip = 0.02f;
 
         [Tooltip("Drives deploy precision from the phone's height above the board (plan.md Mechanic 1). " +
                  "Optional - if unassigned, every deploy lands exactly on the tap.")]
@@ -73,6 +101,31 @@ namespace ScrapSiege.Siege
         private const float RejectedTapLogInterval = 2f;
         private float lastRejectedTapLogTime = -99f;
 
+        private UnitClass selectedClass;
+
+        /// <summary>
+        /// Fires with a human-readable reason whenever a tap is refused, so the HUD can say what
+        /// went wrong. "I tap and nothing happens" is the hardest symptom in this project to
+        /// diagnose from a bug report, and now that line of sight can refuse a tap it would also be
+        /// the most common thing a new player runs into.
+        /// </summary>
+        // Initialised inline rather than relying on Unity to construct them during deserialization.
+        // Every listener here subscribes without a null check, so a null event is an immediate
+        // NullReferenceException on scene load - cheap insurance for a field nobody wires by hand.
+        public UnityEngine.Events.UnityEvent<string> OnDeployRejected = new UnityEngine.Events.UnityEvent<string>();
+
+        /// <summary>Fires with the newly selected class so the HUD and RallyController can follow it.</summary>
+        public UnityEngine.Events.UnityEvent<UnitClass> OnSelectedClassChanged = new UnityEngine.Events.UnityEvent<UnitClass>();
+
+        /// <summary>What the next tap will deploy. Null on the legacy single-unit path.</summary>
+        public UnitClass SelectedClass => selectedClass;
+
+        /// <summary>Scrap the next deploy will cost.</summary>
+        public int SelectedCost => selectedClass != null ? selectedClass.cost : unitCost;
+
+        /// <summary>The roster this match is drawing from, so the HUD can build its bar from it.</summary>
+        public UnitRoster Roster => roster;
+
         private void Awake()
         {
             // Must not process taps during Fortify - only SiegePhaseController.StartSiege()
@@ -89,6 +142,51 @@ namespace ScrapSiege.Siege
             if (unitPrefab == null) Debug.LogError("UnitDeploymentController: Unit Prefab is not assigned.", this);
             else if (unitPrefab.GetComponent<SiegeUnit>() == null)
                 Debug.LogError("UnitDeploymentController: Unit Prefab has no SiegeUnit component.", this);
+            if (rallyController == null)
+                Debug.LogError("UnitDeploymentController: Rally Controller is not assigned - a tap that places a rally point will ALSO deploy and charge for a unit.", this);
+
+            // Even though OnEnable resolves this again at siege start, do it here too: the HUD and
+            // the roster bar both read SelectedClass on their own first frame, and a null selection
+            // shows the player a bar with nothing highlighted.
+            ResolveDefaultClass();
+        }
+
+        /// <summary>
+        /// Picks the opening class.
+        ///
+        /// <para><b>Not in Start.</b> <see cref="Awake"/> sets <c>enabled = false</c> so no tap is
+        /// processed before Siege begins - and Unity never calls Start on a component that is
+        /// disabled before its first frame. A Start-based default therefore silently never ran:
+        /// verified in play mode, where the roster bar had built all five chips while
+        /// <see cref="SelectedClass"/> was still null and every deploy would have cost the fallback
+        /// price and spawned a class-less unit.</para>
+        ///
+        /// <para>Resolved again in <see cref="OnEnable"/> (i.e. when Siege starts) because
+        /// <see cref="UnitRoster.DefaultClass"/> consults <see cref="ScrapSiege.Monetization.ProEntitlement"/>,
+        /// which resolves asynchronously - by siege start it has had ample time, whereas at Awake it
+        /// may not have.</para>
+        /// </summary>
+        private void ResolveDefaultClass()
+        {
+            if (roster == null) return;
+            if (selectedClass != null && UnitRoster.IsUnlocked(selectedClass)) return;
+
+            SelectClass(roster.DefaultClass());
+        }
+
+        private void OnEnable() => ResolveDefaultClass();
+
+        /// <summary>
+        /// Wire to a roster chip. Refuses locked classes rather than silently deploying something
+        /// else - the paywall, not this, is what should answer a tap on a Pro class.
+        /// </summary>
+        public void SelectClass(UnitClass unitClass)
+        {
+            if (unitClass != null && !UnitRoster.IsUnlocked(unitClass)) return;
+            if (selectedClass == unitClass) return;
+
+            selectedClass = unitClass;
+            OnSelectedClassChanged?.Invoke(selectedClass);
         }
 
         /// <summary>Wire to a "Deploy Direct" button - selects the fast/open route for the next tap.</summary>
@@ -163,15 +261,64 @@ namespace ScrapSiege.Siege
         }
 
         /// <summary>
+        /// Which deploy sound a class lands with. Every value currently synthesizes to the same
+        /// recipe, so this changes nothing audible today - it exists so that dropping three files
+        /// into <c>Assets/Audio/Resources/Sfx/</c> gives heavy, stealth and standard deploys their
+        /// own weight without touching this code again.
+        /// </summary>
+        private static ScrapSiege.Audio.Sfx DeploySoundFor(UnitClass unitClass)
+        {
+            if (unitClass == null) return ScrapSiege.Audio.Sfx.Deploy;
+            if (unitClass.invisibleToSentries) return ScrapSiege.Audio.Sfx.StealthDeploy;
+            if (unitClass.IsStationary || unitClass.health >= 6) return ScrapSiege.Audio.Sfx.HeavyDeploy;
+
+            return ScrapSiege.Audio.Sfx.Deploy;
+        }
+
+        /// <summary>
         /// Every rejection path here used to be a bare `return`, so "I tap and nothing happens" -
         /// the single hardest symptom to diagnose from a bug report - produced not one line of log.
         /// Throttled rather than per-tap because a frustrated player taps a lot.
         /// </summary>
-        private void LogRejectedTap(string reason)
+        private void LogRejectedTap(string reason, string playerFacing = null)
         {
+            // The player-facing message is raised every time - it is feedback, and throttling it
+            // would mean the second tap of a frustrated pair got no answer. Only the log is capped.
+            if (playerFacing != null) OnDeployRejected?.Invoke(playerFacing);
+
             if (Time.unscaledTime - lastRejectedTapLogTime < RejectedTapLogInterval) return;
             lastRejectedTapLogTime = Time.unscaledTime;
             Debug.Log($"[Deploy] tap ignored - {reason}. board={(levelMatch != null && levelMatch.BoardRoot != null ? "placed" : "none")}");
+        }
+
+        /// <summary>
+        /// The AR-native half of deployment (plan.md Mechanic 2). A spot behind a wall from where
+        /// the player is actually standing cannot be deployed onto - so opening a route means
+        /// physically walking round the table, not selecting a different button.
+        ///
+        /// Uses the same static <see cref="ScrapSiege.Vision.LineOfSightController.HasClearLine"/>
+        /// the reveal system does, deliberately: two implementations of "can I see this" would drift
+        /// apart, and the failure mode of a mis-set occluder mask is silent (everything stays
+        /// visible / everything stays deployable), which is exactly the class of bug this project
+        /// keeps paying for.
+        /// </summary>
+        private bool HasSightlineTo(Vector3 point)
+        {
+            if (!requireLineOfSight) return true;
+
+            Camera cam = ResolveCamera();
+            if (cam == null) return true;
+
+            // Aim slightly above the table so the ray does not graze the board slab itself.
+            float lift = levelMatch != null && levelMatch.BoardLength > 0f
+                ? levelMatch.BoardLength * 0.01f
+                : ScrapSiege.Core.WorldScale.Metres(0.005f);
+
+            return ScrapSiege.Vision.LineOfSightController.HasClearLine(
+                cam.transform.position,
+                point + Vector3.up * lift,
+                sightBlockerMask,
+                ScrapSiege.Core.WorldScale.Metres(sightNearClip));
         }
 
         private void Update()
@@ -182,10 +329,14 @@ namespace ScrapSiege.Siege
             if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(touch.touchId.ReadValue()))
                 return;
 
+            // An armed Rally owns this tap. Both components poll the same touch from their own
+            // Update, so before this the player got a rally AND a paid-for unit from one tap.
+            if (rallyController != null && rallyController.ClaimsBoardTap) return;
+
             Vector2 screenPos = touch.position.ReadValue();
             if (!TryResolveTapPoint(screenPos, out Vector3 tapPoint))
             {
-                LogRejectedTap("the tap did not land on the board");
+                LogRejectedTap("the tap did not land on the board", "Tap on the board.");
                 return;
             }
 
@@ -209,7 +360,28 @@ namespace ScrapSiege.Siege
 
             if (!NavMesh.SamplePosition(deployPoint, out NavMeshHit navHit, snapDistance, NavMesh.AllAreas))
             {
-                LogRejectedTap($"no walkable NavMesh point within {snapDistance:0.###}m of the tap");
+                LogRejectedTap($"no walkable NavMesh point within {snapDistance:0.###}m of the tap",
+                               "Nothing can stand there.");
+                return;
+            }
+
+            // Reinforcements arrive from your own lines. Checked against the SNAPPED point for the
+            // same reason the sightline is - the point the unit will actually occupy is the one that
+            // has to be legal, and both the scatter and the snap can move a tap several centimetres.
+            if (levelMatch != null && !levelMatch.IsInDeployZone(navHit.position))
+            {
+                LogRejectedTap("the tap landed outside the player's deploy zone",
+                               "Deploy inside your own lines.");
+                return;
+            }
+
+            // Checked against the SNAPPED point, not the raw tap - the point a unit will actually
+            // occupy is the one that has to be visible, and the snap can move a tap by several
+            // centimetres of real table.
+            if (!HasSightlineTo(navHit.position))
+            {
+                LogRejectedTap("no line of sight from the camera to the deploy point",
+                               "No line of sight — move to see that ground.");
                 return;
             }
 
@@ -219,11 +391,17 @@ namespace ScrapSiege.Siege
                 return;
             }
 
-            if (!resourceEconomy.TrySpend(unitCost)) return;
+            int cost = SelectedCost;
+            if (!resourceEconomy.TrySpend(cost))
+            {
+                LogRejectedTap($"not enough scrap for {(selectedClass != null ? selectedClass.displayName : "a unit")} (cost {cost})",
+                               $"Not enough scrap — {(selectedClass != null ? selectedClass.displayName : "unit")} costs {cost}.");
+                return;
+            }
 
             // After TrySpend, so the sound only fires on a deploy that actually happened - a tap
             // the player cannot afford should stay silent rather than sounding successful.
-            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.Deploy);
+            ScrapSiege.Audio.GameAudio.Play(DeploySoundFor(selectedClass));
 
             var unit = Instantiate(unitPrefab, navHit.position, Quaternion.identity);
             var siegeUnit = unit.GetComponent<SiegeUnit>();
@@ -233,7 +411,13 @@ namespace ScrapSiege.Siege
             // the same way by copy-paste.
             siegeUnit.SetTeam(Team.Player);
 
-            NavMeshAreas.ApplyCoverPreference(siegeUnit.Agent, preferCover: pendingMode == DeployMode.Covered);
+            // Before ConfigureForBoard, which reads the class's engagement fraction and applies its
+            // speed multiplier, and before SetTarget, which an emplacement answers differently.
+            siegeUnit.ApplyClass(selectedClass);
+
+            NavMeshAreas.ApplyCoverPreference(siegeUnit.Agent,
+                                              preferCover: pendingMode == DeployMode.Covered,
+                                              costMultiplier: siegeUnit.CoverCostVariance);
 
             // Before SetTarget, which multiplies the per-unit speed variance onto the base speed.
             if (boardLength > 0f) siegeUnit.ConfigureForBoard(boardLength);

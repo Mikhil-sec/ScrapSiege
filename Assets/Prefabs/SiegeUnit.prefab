@@ -14,6 +14,7 @@ GameObject:
   - component: {fileID: 3465119077975583386}
   - component: {fileID: 12964829110676098}
   - component: {fileID: 4146898548000215662}
+  - component: {fileID: 8946992348084571603}
   m_Layer: 0
   m_Name: SiegeUnit
   m_TagString: Untagged
@@ -95,12 +96,22 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ScrapSiege.Siege.SiegeUnit
   arrivalDistance: 0.15
-  damageToBase: 1
-  health: 3
+  damageToBase: 5
+  health: 15
   rotationSpeed: 8
   speedVarianceMin: 0.85
   speedVarianceMax: 1.15
   arrivalJitterRadius: 0.1
+  boardCrossingSeconds: 16
+  arrivalDistanceFraction: 0.045
+  arrivalJitterFraction: 0.035
+  engagementRadiusFraction: 0.06
+  attackTickSeconds: 0.5
+  attackDamage: 5
+  coverDamageMultiplier: 0.5
+  winnerRecoverySeconds: 0.8
+  navMeshSampleFraction: 0.02
+  unitClass: {fileID: 0}
 --- !u!114 &12964829110676098
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -119,9 +130,9 @@ MonoBehaviour:
   weaponArm: {fileID: 0}
   legSwingDegrees: 38
   stridesPerMetre: 5.5
-  bobHeight: 0.02
+  bobHeightFraction: 0.03
   leanDegrees: 8
-  lungeDistance: 0.1
+  lungeDistanceFraction: 0.12
   lungeDurationSeconds: 0.25
 --- !u!114 &4146898548000215662
 MonoBehaviour:
@@ -137,6 +148,18 @@ MonoBehaviour:
   m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Siege.UnitTeamTint
   baseMaterial: {fileID: 2100000, guid: 78a9eec088419af42bc4b33b55c9ef66, type: 2}
   teamColor: {r: 0.2, g: 0.45, b: 0.85, a: 1}
+--- !u!114 &8946992348084571603
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4063369654202232281}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bc8d1948a5955bb48a0778475d4141cd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Siege.UnitClassVisual
 --- !u!1001 &478975835184822042
 PrefabInstance:
   m_ObjectHideFlags: 0

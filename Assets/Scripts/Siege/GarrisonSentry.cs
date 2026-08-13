@@ -35,7 +35,7 @@ namespace ScrapSiege.Siege
         [SerializeField] private float facingArcDegrees = 150f;
 
         [SerializeField] private float tickInterval = 0.5f;
-        [SerializeField] private int damagePerTick = 1;
+        [SerializeField] private int damagePerTick = 5;
         [SerializeField] private float navMeshSampleDistance = 0.1f;
 
         /// <summary>Read by SentryArcVisualizer so the drawn wedge always matches the real rule.</summary>
@@ -72,6 +72,41 @@ namespace ScrapSiege.Siege
             this.boardLength = boardLength;
             detectionRadius = detectionRadiusFraction * boardLength;
             navMeshSampleDistance = navMeshSampleFraction * boardLength;
+
+            ApplyBoardScale(boardLength);
+        }
+
+        [Tooltip("Board length in REAL metres that the prefab's size is authored against. Must match " +
+                 "SiegeUnit.referenceBoardLength, or sentries and the units they shoot at end up " +
+                 "different sizes on any board that is not 0.60m.")]
+        [SerializeField] private float referenceBoardLength = 0.6f;
+
+        [SerializeField] private Vector2 boardScaleClamp = new Vector2(0.55f, 1.8f);
+
+        private bool boardScaleApplied;
+
+        /// <summary>
+        /// Same fix, same reasoning, as <see cref="SiegeUnit.ApplyBoardScale"/> - a sentry that
+        /// stayed a fixed real size while the board shrank was the other half of "troops look giant
+        /// compared to the map". Kept as a separate copy rather than a shared helper because the two
+        /// classes have no common base and the whole rule is four lines; a static utility taking a
+        /// Transform and a NavMeshAgent-or-null would be more indirection than the rule is worth.
+        /// </summary>
+        private void ApplyBoardScale(float boardLength)
+        {
+            if (boardScaleApplied) return;
+
+            float reference = WorldScale.Metres(referenceBoardLength);
+            if (reference <= 0f) return;
+
+            float factor = Mathf.Clamp(boardLength / reference,
+                                       Mathf.Min(boardScaleClamp.x, boardScaleClamp.y),
+                                       Mathf.Max(boardScaleClamp.x, boardScaleClamp.y));
+
+            boardScaleApplied = true;
+            if (Mathf.Approximately(factor, 1f)) return;
+
+            transform.localScale *= factor;
         }
 
         private void Awake()
@@ -108,6 +143,11 @@ namespace ScrapSiege.Siege
                 // shoot the AI commander's own advancing units.
                 if (unit.Team == Team) continue;
                 if (!unit.IsAlive) continue;
+
+                // The Saboteur's whole reason to exist: a class a sentry simply never sees, so the
+                // long watched flank becomes a route worth paying for rather than a punishment.
+                // Checked before the arc test so a stealth unit costs nothing to skip.
+                if (unit.InvisibleToSentries) continue;
 
                 if (!IsInArc(unit.transform.position)) continue;
                 if (IsInCoverLane(unit.transform.position)) continue;

@@ -618,3 +618,252 @@ this file's older sections, for where things stand.
 **User's plan from here:** start a fresh session and reassess what's left from there. Known remaining
 work per [[project_scrap_siege_shipaton_readiness]]: AI tuning, on-device sound verification, content
 depth, and — deliberately last, only once the product is final — the demo video.
+
+## Current state (2026-08-11) — Pass D: depth pass. BUILT AND EDITOR-VERIFIED, NOT DEVICE-TESTED
+
+Six items the user asked for after the 0.5.0 device test. `plan.md` Section 9 "Pass D" has the full
+design writeup and the class stat table; Section 10 has two new risk flags. This is the summary.
+
+**Everything below compiles clean, every Inspector reference was set and read back non-null, and the
+class system was exercised in Editor play mode. None of it has run on the device.**
+
+### What shipped
+
+1. **Unit classes** — `UnitClass` + `UnitRoster` ScriptableObjects, five classes in `Assets/Units/`:
+   Trooper (1 scrap, baseline), Bulwark (2, 9 HP, soaks), Marksman (2, reach 0.17 of board),
+   Saboteur (3, invisible to sentries, never stops, 4 base damage), Turret (4, stationary
+   emplacement, **Pro-gated**). Shipping a sixth is an asset plus a roster entry — no prefab, script
+   or scene edit. `UnitRosterBar` builds the deploy chips from the asset at runtime.
+2. **Asymmetric duels.** The frontage rule is untouched (one unit fights at most one enemy). What is
+   new: each side independently checks the range *it* can fire from, so a marksman stands and shoots
+   while its melee opponent walks in. One range comparison, no parallel ranged-combat system.
+3. **Selective Rally** — `RallyController.SetScope(UnitClass)`, null = whole army. HUD toggle switches
+   between ALL and the selected deploy class. Emplacements always excluded.
+4. **AR intent** — terrain heights raised hard (Tall 0.130 → **0.220** of board length; a Tall piece
+   goes from 7.8 cm to 13 cm on a 0.60 m board, against a 5.2 cm unit), new per-level
+   `LevelDefinition.terrainHeightScale`, **deploy now requires line of sight**, reticle turns red on
+   an occluded point, HUD shows "N CONTACTS UNSEEN · MOVE TO LOOK".
+5. **Navigation** — top-bar MENU button (confirm modal mid-match) and MAIN MENU on the outcome card.
+   There was previously no way back to the menu at all.
+6. **Level-select paging** — 3 per page, prev/next, "PAGE 1 / 2".
+7. **Recorded-audio override layer** — drop a WAV named after an `Sfx` value into
+   `Assets/Audio/Resources/Sfx/` and it replaces synthesis for that sound; delete it and synthesis
+   returns. Six new `Sfx` values for the classes. **`docs/SOUND_SHOPPING_LIST.md` is the user's
+   to-do list** — search terms, licence rules (CC0 only), length targets, and a provenance table.
+
+### Three latent bugs found and fixed on the way — all one root cause
+
+`RallyController` and `DeployReticle` were still requiring a `PlaneWithinPolygon` ARCore hit. Deploy
+was fixed for exactly this on 2026-08-10; these two were missed. On the Tab S6 Lite — which tracks
+fine but has never promoted anything to a plane — that means **every rally tap was being silently
+discarded for the whole match, and the deploy precision ring never appeared at all.** Both now
+intersect the placed board's own transform, same as deploy. If a fourth component ever needs a tap
+point on the table, copy that pattern; do not reach for `ARRaycastManager`.
+
+### The bug play mode caught, and why it is worth remembering
+
+`UnitDeploymentController.Awake` sets `enabled = false` (nothing may process taps before Siege).
+**Unity never calls `Start()` on a component disabled before its first frame**, so a `Start`-based
+default-class selection silently never ran — the roster bar had built all five chips while
+`SelectedClass` was still null. Resolution now happens in `Awake` and again in `OnEnable`. Applies to
+every self-disabling controller in this project (`RallyController`, `DeployReticle`,
+`AICommander`, `UnitDeploymentController` all do this): **do not put initialization in `Start` on any
+of them.**
+
+### Read before touching this work
+
+- `plan.md` Section 10's first two bullets: `requireLineOfSight` is the highest-risk change here, with
+  a written dial-down order if it plays badly. Do not conclude the AR-intent direction failed from one
+  bad session — the terrain height alone delivers most of the benefit.
+- The Turret being Pro-gated is a deliberate but arguable call, reversible with one checkbox on
+  `Assets/Units/Turret.asset`.
+- Balance across five classes is **entirely untuned**. The numbers are derived from the existing
+  1 damage / 0.5 s tick convention, not from play.
+
+## Current state (2026-08-13) — Pass E: device-report fixes + per-class art. EDITOR-VERIFIED, NOT DEVICE-TESTED
+
+Ten items from the user's on-device test of Pass D. Full writeup in `plan.md` Section 11; this is the
+summary and the things worth not re-learning.
+
+**Everything compiles clean, every Inspector reference set this pass was read back and asserted
+non-null, and all five class models were rendered before export and measured after import. None of it
+has run on a phone. Pass D is still un-device-tested too.**
+
+### The three bugs, and their single causes
+
+- **Selective Rally never worked** — `RallyScopeButton` was authored `m_Interactable: 0` in
+  `ARTest.unity`. The scope logic was always correct; the only control that reaches it could not be
+  tapped. Fixed in the scene *and* forced true in `HudController.HandleRallyScopeChanged`.
+- **Double click sound** — `UIButtonMotion.OnPointerDown` plays `Sfx.UiTap` for every button in the
+  game, and two handlers played it again. **Rule: button-press audio belongs to `UIButtonMotion` and
+  nowhere else.** A handler may only add a sound that is different from the tap. Caught the same trap
+  a second time this pass (`BaseHealth` already plays `Sfx.BaseHit`, so the new base-impact FX is
+  visual only).
+- **Unreadable "MAIN MENU"** — `UITheme.TextOnAccent` (dark ink for amber buttons) on a dark
+  `SurfaceRaised` fill. Fixed as a scene-wide rule, not one value.
+
+### Two absolutes that should always have been board-relative
+
+- **Unit size** was fixed at 5.2 cm regardless of board size — the last absolute size in the project,
+  and the cause of "troops look giant compared to the map" on a small board.
+  `SiegeUnit.ApplyBoardScale` / `GarrisonSentry.ApplyBoardScale` now key off
+  `boardLength / referenceBoardLength` (0.60 m), clamped 0.55–1.8, agent radius following the model.
+- **The "big red sphere" was the last-known-contact ghost**, not a tracer — sized
+  `WorldScale.Metres(0.05f)`, i.e. as tall as the trooper it stood in for. Now measured from its own
+  target's renderers and flattened to a disc so it reads as a map mark, not a projectile.
+
+### Health/damage are 5x
+
+Everything (units, both prefabs, sentry tick, `BaseHealth`, all five levels) multiplied by 5, C#
+defaults moved in lockstep. **Balance is unchanged** — the point is tuning headroom, because at the old
+scale the smallest step was a 33% swing. **Do not reintroduce a 1 or a 2 unless you mean "a fifth of a
+hit".** Marksman reach doubled to 0.34 of board and damage cut to 4 per the user's request; **this is
+the most likely thing in the pass to be over-tuned** — raise `attackTickSeconds` before touching the
+reach, since the reach is the class's identity.
+
+### Per-class models replace the primitive accessories
+
+`Unit_Bulwark`, `Unit_Marksman`, `Unit_Saboteur`, `Unit_Turret`, `Sentry_Turret` in `Assets/Models`,
+built in Blender's existing `ScrapSiege_v2` collection. Trooper keeps the shared body on purpose (it
+is the baseline and keeps the fallback path exercised). `UnitClass.modelPrefab` +
+`UnitClassVisual.SwapInClassModel` + `UnitAnimator.Rebind()`.
+
+Two Blender lessons worth not repeating:
+- **Never read `parent.matrix_world` for an object created in the same script** without forcing a
+  depsgraph update — Blender had not re-evaluated it, so every child of a pivoted part was displaced
+  by its parent's pivot and the marksman's rifle pointed at the sky.
+- **Blender object names are file-global.** Renaming `Torso.001` to `Torso` while the original
+  trooper owns `Torso` silently suffixes one of them, and that name is baked into the FBX that
+  `UnitAnimator` looks parts up by. Stash every object to a unique placeholder first.
+
+Also: **height is normalised at swap time, never assumed.** The shared trooper FBX imports at 1/100
+scale with a −90° X root rotation; the new models import 1:1 with none. Matching conventions by hand
+is exactly how you get a speck or a giant.
+
+### Combat FX
+
+`CombatFx.Impact()` — a pooled shard burst fired from **the code that applies the damage** (melee,
+ranged, sentry, and a bigger one on base hits). Melee previously had no visual at all, so two units
+fighting read as two units loitering. Pooled cubes rather than a `ParticleSystem` because sizes must
+come from board length.
+
+### Paywall copy is derived, not written
+
+`ProFeatureCopy.BuildFeatureList()` reads `requiresPro` off `LevelCatalog` and `UnitRoster`. Both
+scenes call it on paywall open. `MainMenu.unity` had been promising two systems that **do not exist**
+("more cosmetic board themes", "extra visual effect packs"). Ship a Pro level and the paywall now
+advertises it with no edit anywhere.
+
+### RevenueCat status — integration is sound; dashboard Paywalls are NOT used
+
+Offerings/purchase/restore/sync/entitlement all correct, with the decoupled `ProEntitlement` gate.
+**But RevenueCat's own dashboard-designed Paywalls are supported on Unity** via
+`com.revenuecat.purchases-ui-unity` (`PaywallsPresenter.Present()`), which is **not** in
+`Packages/manifest.json` — only `com.revenuecat.purchases-unity` 7.4.1 is — and the dashboard has zero
+paywalls configured. Adopting it buys remote copy edits and Experiments; the risk is that it renders a
+**native view over the Unity view**, i.e. over a live ARCore session in the match scene, and cannot be
+tested in the Editor at all. **Low-risk shape if adopted: dashboard paywall from the main menu, custom
+panel retained in-match.** Awaiting the user's decision.
+
+### ⚠️ Adopting RevenueCat Paywalls means a MAJOR SDK upgrade — measured 2026-08-13, do not re-derive
+
+The user chose "dashboard paywall on the main menu only" on 2026-08-13. It was **not started**, because
+checking the registry first changed the size of the job:
+
+- The project is on `com.revenuecat.purchases-unity` **7.4.1**.
+- `com.revenuecat.purchases-ui-unity` (the package that renders dashboard paywalls) **has no 7.x
+  line at all**. Lowest published version is **8.4.0**; latest is 9.7.0. Both packages ship from one
+  monorepo on a shared release train, so there is no compatible pairing with 7.4.1.
+- Its published dependency is literally `"com.revenuecat.purchases-unity": "file:../RevenueCat"` — a
+  local path leaked out of RevenueCat's own build. UPM may fail to resolve that cleanly; the
+  `.unitypackage` import route documented as "Option 2" is the fallback if it does.
+- SDK 8.x is a **breaking** major bump that touches `MonetizationManager` directly
+  (`PurchasesConfiguration.Builder`, `DangerousSettings`, callback signatures). Docs also note 8.0.0+
+  requires Unity IAP 5.0.0+ *if* Unity IAP is used side by side — this project does not use Unity IAP
+  (`com.unity.purchasing` is absent from the manifest), so that clause should not apply.
+
+**Why it was not done anyway:** this is the stack that already cleared the hackathon's hard entry
+requirement after a multi-day credentials/autosync/already-owned saga. A major version bump on it is a
+scope and risk decision for the user, not an implementation detail. It is revertible (manifest.json
+plus `MonetizationManager.cs` and `PaywallController.cs`), and there is time before 2026-09-30.
+
+**What WAS done, and is zero-risk:** the paywall itself is built in the dashboard —
+`pw1f70650488f14606`, attached to offering `ofrngf9d92167ba` (`default`, current), **unpublished
+draft**, styled to match `UITheme` exactly and listing only the four real Pro features. If the SDK
+upgrade is declined, archive it; nothing in the app references it.
+
+## Current state (2026-08-13, later) — Pass F: the D+E device report. EDITOR-VERIFIED, NOT DEVICE-TESTED
+
+Five items from the user's on-device test of Passes D and E, plus the Pro cosmetic tier item 1
+implied. Full writeup is `plan.md` **Section 12**; this is the summary and the lessons worth not
+re-learning. **Both assemblies compile clean, the Unity console is empty, every reference set this
+pass was read back non-null, and none of it has run on a phone.** Passes D and E remain
+un-device-tested too — one device session now covers all three.
+
+### The class models: the bug was in the FBX, not in the code that swaps them
+
+Every class except the Trooper rendered as "a big top and two cube legs". The cause was a
+**non-identity `matrix_parent_inverse`** on every part built as a child of `Torso`: Blender composes
+that into the world matrix so the viewport and the reference render are both correct, but the FBX
+export does not carry it faithfully and Unity received those parts at **0.01 scale, piled at the
+feet**. The correlation was exact — every broken object had a non-identity parent-inverse, every
+correct one (the entire Trooper) had identity.
+
+**Standing rule: an object with a non-identity `matrix_parent_inverse` is not safe to export.** Bake
+it into the object's own basis before exporting, top-down, and assert the world matrices did not
+move. That assertion is what made this a one-shot fix — 31 objects, zero drift, then re-export.
+
+**Knock-on that would have been a new bug:** the re-exported FBXs now import like `SiegeTrooper` does
+(root scale 100, root rotation −90° X) where the old ones imported 1:1 with no rotation.
+`UnitClassVisual.SwapInClassModel` was overwriting the instantiated model's rotation and scale with
+identity — harmless before, and from now on it would lay every model on its back, which is the
+**exact bug this project already shipped on 2026-08-08**. It now keeps whatever the importer decided
+and only multiplies the magnitude. **Never reset an imported model's root rotation or scale.**
+
+### `renderer.materials` does not guarantee a fresh instance
+
+Enemy debris rendered magenta. Not a shader or a stripping problem: `renderer.materials` returns the
+*existing* instances if anything already instanced them, `VisionTarget` always has on enemy/garrison
+units, and `VisionTarget.OnDestroy` destroys them a frame later — leaving the debris holding
+destroyed materials, i.e. Unity's error material. Player units were fine only because they have no
+`VisionTarget`, which is why it looked enemy-specific.
+
+**Rule: if you intend to own a material, `new Material(source)` from `sharedMaterials` and assign
+back through `sharedMaterials`.** Reading `.material`/`.materials` expresses a wish, not ownership.
+
+### Two systems polling the same touch
+
+An armed Rally tap redirected the army *and* deployed a paid-for unit, because `RallyController` and
+`UnitDeploymentController` each read `Touchscreen.current.primaryTouch` from their own `Update`.
+Guarding on `armed` alone is not enough — Rally clears it inside the same Update that consumes the
+tap, so the bug would appear or disappear with script execution order. `RallyController.ClaimsBoardTap`
+records the **frame** instead, and stakes the claim before the tap is known to resolve.
+**Any future component that reads a board tap must consult it.**
+
+### Deployment is restricted to the player's own lines, and the rule is drawn
+
+`LevelBuilder.DeployZoneDepth` (0.30 of board length forward of the player's edge) is the single
+number: `LevelBuilder` paints the band and its limit line from it, and `UnitDeploymentController` /
+`DeployReticle` read it back through `LevelMatchController`. Verified open on all five levels. The
+reticle greys out past the limit in a **different** colour from a blocked sightline on purpose — one
+means "move so you can see it", the other "you can see it fine, it is not your ground". The standing
+HUD prompt changed too, because "Tap the table to deploy" had become a lie.
+
+### Route variety is three layers
+
+Per-unit approach lane (`SiegeUnit.PickApproachLane`, `laneSpreadFraction` 0.16 — **this is the dial**),
+per-unit cover cost (`SiegeUnit.CoverCostVariance`, 0.7–1.5×), and spread avoidance priority (30–70).
+The lane is a committed waypoint rather than steering noise, and its **onward leg is proven
+`PathComplete` before it is accepted** — otherwise a unit could reach a pocket it cannot leave and
+sit there with `remainingDistance` reading 0, the trap this project already lost a session to.
+
+### Pro now sells something that is not power
+
+`UnitClass.proModelPrefab` + `UnitClassVisual.ResolveModelPrefab` swap in a **Veteran skin** for all
+five classes while the entitlement is active. Purely cosmetic, each trimmed to its base model's
+measured height (the swap normalises height, so a taller veteran shrinks its own body and reads as a
+downgrade). `ProFeatureCopy` counts them, so the paywall advertises the set with no hand-written
+string. This is the honest counterweight to the Turret being gated — see `plan.md` Section 7.
+
+`docs/art/unit_lineup_front.png` and `unit_lineup_veteran.png` are now **in-engine renders of what
+actually ships**, not Blender previews.

@@ -9,7 +9,7 @@ namespace ScrapSiege.Siege
     /// </summary>
     public class BaseHealth : MonoBehaviour
     {
-        [SerializeField] private int maxHealth = 20;
+        [SerializeField] private int maxHealth = 100;
 
         public UnityEvent<int> OnHealthChanged;
         public UnityEvent OnBaseDestroyed;

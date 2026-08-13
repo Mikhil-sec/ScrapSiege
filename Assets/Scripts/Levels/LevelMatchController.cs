@@ -73,6 +73,25 @@ namespace ScrapSiege.Levels
         public Transform PlayerBase => builder != null ? builder.PlayerBase : null;
         public BaseHealth PlayerBaseHealth => builder != null ? builder.PlayerBaseHealth : null;
 
+        /// <summary>
+        /// True when <paramref name="worldPoint"/> lies inside the player's deploy zone - the strip
+        /// of board the builder draws in front of the player's own edge.
+        ///
+        /// <para>Returns true when there is no board or no builder, so the legacy scan/Fortify path
+        /// (which has neither, and no notion of ends) keeps its deploy-anywhere behaviour instead of
+        /// silently refusing every tap.</para>
+        /// </summary>
+        public bool IsInDeployZone(Vector3 worldPoint)
+        {
+            Transform board = BoardRoot;
+            if (board == null || builder == null) return true;
+
+            return builder.IsInDeployZone(board.InverseTransformPoint(worldPoint));
+        }
+
+        /// <summary>Deploy zone depth as a fraction of board length. See <see cref="LevelBuilder.DeployZoneDepth"/>.</summary>
+        public float DeployZoneDepth => builder != null ? builder.DeployZoneDepth : 1f;
+
         private void Awake()
         {
             CheckRef(placement, nameof(placement));

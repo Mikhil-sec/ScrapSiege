@@ -50,6 +50,10 @@ namespace ScrapSiege.Siege
                  "the player's own unit prefab deliberately has none, since you always see your army.")]
         [SerializeField] private GameObject enemyUnitPrefab;
 
+        [Tooltip("Unit classes the commander may field, with weights. Optional: without it the AI " +
+                 "keeps fielding the prefab's own stats, exactly as it did before classes existed.")]
+        [SerializeField] private UnitRoster roster;
+
         [Header("Events")]
         /// <summary>Fires when a wave is committed, before it appears. The HUD's incoming-attack warning hangs off this.</summary>
         public UnityEvent<Vector3> OnWaveTelegraphed;
@@ -64,6 +68,7 @@ namespace ScrapSiege.Siege
         private bool hasPendingWave;
         private Vector3 pendingSpawnPoint;
         private int pendingUnitCount;
+        private UnitClass pendingClass;
 
         private void Awake()
         {
@@ -130,7 +135,7 @@ namespace ScrapSiege.Siege
             if (pendingSpawnTimer > 0f) return;
 
             hasPendingWave = false;
-            int deployed = SpawnWave(pendingSpawnPoint, pendingUnitCount);
+            int deployed = SpawnWave(pendingSpawnPoint, pendingUnitCount, pendingClass);
             OnWaveLanded?.Invoke(deployed);
         }
 
@@ -338,12 +343,23 @@ namespace ScrapSiege.Siege
         {
             units = Mathf.Max(1, units);
 
-            int total = costPerUnit * units;
+            int banked = resourceEconomy != null ? resourceEconomy.CurrentResources : 0;
+
+            // One class per wave rather than per unit. A mixed squad reads as noise at 5cm; a wave
+            // that is visibly "three riflemen" or "one heavy" is something the player can recognise
+            // and answer, which is the whole point of telegraphing it.
+            pendingClass = roster != null ? roster.PickForAI(banked) : null;
+
+            // The action's own cost stays the floor - a class is an upgrade on top of the decision,
+            // never a discount that lets the AI act sooner than its profile allows.
+            int perUnit = pendingClass != null ? Mathf.Max(costPerUnit, pendingClass.cost) : costPerUnit;
+
+            int total = perUnit * units;
             if (resourceEconomy == null || !resourceEconomy.TrySpend(total))
             {
                 // Afford what we can rather than dropping the decision entirely.
                 units = 1;
-                if (resourceEconomy == null || !resourceEconomy.TrySpend(costPerUnit)) return;
+                if (resourceEconomy == null || !resourceEconomy.TrySpend(perUnit)) return;
             }
 
             float boardLength = levelMatch.BoardLength;
@@ -356,10 +372,15 @@ namespace ScrapSiege.Siege
             pendingSpawnTimer = Mathf.Max(0f, profile.telegraphLeadSeconds);
             hasPendingWave = true;
 
+            // The telegraph is the player's whole window to react, and until now it was silent - the
+            // wave simply appeared. A warning tone during the lead-in is what turns Rally from a
+            // button into an answer to something.
+            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.WaveIncoming, 0.8f);
+
             OnWaveTelegraphed?.Invoke(spawn);
         }
 
-        private int SpawnWave(Vector3 origin, int units)
+        private int SpawnWave(Vector3 origin, int units, UnitClass unitClass)
         {
             if (enemyUnitPrefab == null || levelMatch.PlayerBase == null) return 0;
 
@@ -382,7 +403,14 @@ namespace ScrapSiege.Siege
                 if (unit == null) continue;
 
                 unit.SetTeam(Team.Enemy);
-                NavMeshAreas.ApplyCoverPreference(unit.Agent, Random.value < profile.coveredPreferenceChance);
+
+                // Same ordering rule the player's deploy path follows - class first, because
+                // ConfigureForBoard reads the class's engagement fraction and speed multiplier.
+                unit.ApplyClass(unitClass);
+
+                NavMeshAreas.ApplyCoverPreference(unit.Agent,
+                                                  Random.value < profile.coveredPreferenceChance,
+                                                  unit.CoverCostVariance);
                 unit.ConfigureForBoard(boardLength);
                 unit.SetTarget(levelMatch.PlayerBase.position, levelMatch.PlayerBaseHealth);
 

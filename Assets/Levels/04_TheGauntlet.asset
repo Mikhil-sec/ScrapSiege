@@ -72,8 +72,8 @@ MonoBehaviour:
   playerBasePosition: {x: 0.5, y: 0.08}
   enemyBasePosition: {x: 0.5, y: 0.92}
   startingResources: 4
-  playerBaseHealth: 14
-  enemyBaseHealth: 8
+  playerBaseHealth: 70
+  enemyBaseHealth: 40
   maxGarrisonUnits: 2
   hasAICommander: 1
   aiProfile: {fileID: 11400000, guid: aae7d6fa44802dd43ab73c4aa77f0148, type: 2}

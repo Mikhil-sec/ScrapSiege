@@ -127,6 +127,11 @@ namespace ScrapSiege.Siege
 
             DrawTracer(target, boardLength);
             FlashTarget(target);
+
+            // Same burst every other damage source now draws, so "something is hitting that unit"
+            // looks identical whether it came from a sentry, a marksman or a melee blow. A tracer
+            // alone told the player where the shot came FROM but never quite that it connected.
+            CombatFx.Impact(AimPoint(target), tracerColor, boardLength);
         }
 
         private void DrawTracer(SiegeUnit target, float boardLength)

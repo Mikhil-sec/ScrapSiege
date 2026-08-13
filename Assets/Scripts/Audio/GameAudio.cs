@@ -98,11 +98,46 @@ namespace ScrapSiege.Audio
             // fired, which is precisely the moment a hitch is most visible.
             foreach (Sfx sfx in System.Enum.GetValues(typeof(Sfx)))
             {
-                var clip = ProceduralSfx.Build(sfx);
+                var clip = LoadOverride(sfx) ?? ProceduralSfx.Build(sfx);
                 if (clip != null) clips[sfx] = clip;
             }
 
             ApplyMute();
+        }
+
+        /// <summary>
+        /// Folder inside a <c>Resources</c> directory where recorded clips live. A file named after
+        /// an <see cref="Sfx"/> value - <c>Assets/Audio/Resources/Sfx/Deploy.wav</c> - silently
+        /// replaces that sound's synthesized version.
+        /// </summary>
+        private const string OverrideFolder = "Sfx";
+
+        /// <summary>
+        /// Looks for a recorded clip to use instead of the synthesized one.
+        ///
+        /// <para><b>Why an override layer rather than replacing synthesis outright.</b> The
+        /// procedural clips in <see cref="ProceduralSfx"/> mean the game is never silent and the
+        /// repo carries no binary blobs - both still worth keeping. But synthesis has a ceiling, and
+        /// a jam entry is judged partly on how it sounds in a two-minute video. This lets recorded
+        /// audio be added <i>one sound at a time</i>: drop in a file, that sound is now recorded,
+        /// everything else keeps working. There is no half-migrated state to manage and no build
+        /// that can end up silent because a file was missing.</para>
+        ///
+        /// <para><see cref="Resources.Load"/> rather than serialized fields, deliberately: a
+        /// serialized array would mean the sound set could only change by editing a scene, and this
+        /// object is created from code precisely so that no scene has to know about it.</para>
+        ///
+        /// <para><b>Licensing.</b> Anything dropped here ships inside a monetized app in a public
+        /// repo, so it must be CC0 / public domain. Attribution-required licences (CC-BY) are a
+        /// redistribution obligation the repo would then have to carry - see
+        /// <c>docs/SOUND_SHOPPING_LIST.md</c>, which records the provenance of every file added.</para>
+        /// </summary>
+        private static AudioClip LoadOverride(Sfx sfx)
+        {
+            var clip = Resources.Load<AudioClip>($"{OverrideFolder}/{sfx}");
+            if (clip != null) Debug.Log($"GameAudio: using recorded clip for {sfx} (overriding synthesis).");
+
+            return clip;
         }
 
         /// <summary>Plays a sound. Safe to call before the bootstrap has run and safe to spam.</summary>

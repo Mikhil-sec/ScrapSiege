@@ -310,7 +310,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dab539cb46e4e114d9a9cbb9d586b4a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ScrapSiege.Siege.BaseHealth
-  maxHealth: 20
+  maxHealth: 100
   OnHealthChanged:
     m_PersistentCalls:
       m_Calls: []

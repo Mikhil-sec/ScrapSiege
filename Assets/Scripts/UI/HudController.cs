@@ -52,6 +52,14 @@ namespace ScrapSiege.UI
         [SerializeField] private CanvasGroup placementPanel;
         [SerializeField] private CanvasGroup siegePanel;
 
+        [Tooltip("The unit roster strip, which sits in its own row ABOVE the bottom bar rather than " +
+                 "inside it. Five class chips plus a rally-scope toggle do not fit alongside the " +
+                 "vantage meter, route segments and rally button on a 1920-wide canvas - authoring " +
+                 "them into the same HorizontalLayoutGroup looked fine at the scene's stored 3313px " +
+                 "width and would have been squashed unusable on the actual device. Faded with the " +
+                 "Siege phase like every other panel.")]
+        [SerializeField] private CanvasGroup rosterPanel;
+
         [Header("Placement phase")]
         [SerializeField] private Button confirmBoardButton;
         [SerializeField] private TMP_Text levelNameLabel;
@@ -94,6 +102,28 @@ namespace ScrapSiege.UI
         [Tooltip("Sub-line inside the outcome panel. Without it a defeat still reads 'The enemy base " +
                  "is scrap', which is the exact opposite of what happened.")]
         [SerializeField] private TMP_Text outcomeBody;
+
+        [Header("Rally scope (selective orders)")]
+        [Tooltip("Small button that widens the rally back to the whole army. Optional.")]
+        [SerializeField] private Button rallyScopeButton;
+
+        [Tooltip("Reads 'RALLY · ALL' or 'RALLY · SNP'. Optional.")]
+        [SerializeField] private TMP_Text rallyScopeLabel;
+
+        [Header("Line of sight (Mechanic 2)")]
+        [Tooltip("Shows how many enemy units are currently out of sight, which is the whole nudge " +
+                 "to physically move. Optional.")]
+        [SerializeField] private TMP_Text unseenContactsLabel;
+
+        [SerializeField] private ScrapSiege.Vision.LineOfSightController lineOfSight;
+
+        [Header("Navigation")]
+        [Tooltip("Scene loaded by the Menu / Main Menu buttons. Must be in Build Settings.")]
+        [SerializeField] private string mainMenuSceneName = "MainMenu";
+
+        [Tooltip("Confirmation shown before abandoning a match in progress. Optional - without it " +
+                 "the Menu button leaves immediately.")]
+        [SerializeField] private GameObject quitConfirmPanel;
 
         [Header("Motion")]
         [SerializeField] private float panelFadeSpeed = 9f;
@@ -151,6 +181,13 @@ namespace ScrapSiege.UI
             {
                 rally.OnArmedChanged.AddListener(HandleRallyArmedChanged);
                 rally.OnRallyIssued.AddListener(HandleRallyIssued);
+                rally.OnScopeChanged.AddListener(HandleRallyScopeChanged);
+            }
+
+            if (deployment != null)
+            {
+                deployment.OnDeployRejected.AddListener(HandleDeployRejected);
+                deployment.OnSelectedClassChanged.AddListener(HandleSelectedClassChanged);
             }
 
             if (placement != null)
@@ -204,6 +241,13 @@ namespace ScrapSiege.UI
             {
                 rally.OnArmedChanged.RemoveListener(HandleRallyArmedChanged);
                 rally.OnRallyIssued.RemoveListener(HandleRallyIssued);
+                rally.OnScopeChanged.RemoveListener(HandleRallyScopeChanged);
+            }
+
+            if (deployment != null)
+            {
+                deployment.OnDeployRejected.RemoveListener(HandleDeployRejected);
+                deployment.OnSelectedClassChanged.RemoveListener(HandleSelectedClassChanged);
             }
 
             if (placement != null)
@@ -238,6 +282,9 @@ namespace ScrapSiege.UI
             HandleVantageChanged(vantage != null ? vantage.Vantage01 : 0f);
             HandleRallyAvailabilityChanged(vantage != null && vantage.IsRallyReady);
 
+            HandleRallyScopeChanged(rally != null ? rally.ScopeLabel : "ALL");
+            if (quitConfirmPanel != null) quitConfirmPanel.SetActive(false);
+
             ApplyProState();
 
             SnapPanelAlphas();
@@ -249,7 +296,47 @@ namespace ScrapSiege.UI
             Fade(fortifyPanel, phase == Phase.Fortify);
             Fade(placementPanel, phase == Phase.Placement);
             Fade(siegePanel, phase == Phase.Siege);
+            Fade(rosterPanel, phase == Phase.Siege);
             Fade(resourceChip, phase == Phase.Siege);
+
+            TickTransientPrompt();
+            TickUnseenContacts();
+        }
+
+        // --- Line of sight readout ----------------------------------------------------------
+
+        /// <summary>
+        /// The one piece of UI that exists purely to make the AR mechanic legible.
+        ///
+        /// <para>A hidden enemy is, by definition, something the player cannot see - so with no
+        /// readout there is nothing on screen to distinguish "the board is clear" from "there are
+        /// three units behind that wall". The count does not say where they are (the drifting
+        /// ghosts do that, badly and on purpose); it only says that moving is worth it. That is
+        /// deliberately the minimum information needed to motivate the physical action, and no
+        /// more - a minimap would answer the question the leaning is supposed to answer.</para>
+        /// </summary>
+        private void TickUnseenContacts()
+        {
+            if (unseenContactsLabel == null) return;
+
+            if (phase != Phase.Siege || lineOfSight == null)
+            {
+                unseenContactsLabel.text = string.Empty;
+                return;
+            }
+
+            int hidden = lineOfSight.HiddenTargetCount;
+            if (hidden <= 0)
+            {
+                unseenContactsLabel.text = "ALL CONTACTS VISIBLE";
+                unseenContactsLabel.color = UITheme.TextMuted;
+                return;
+            }
+
+            unseenContactsLabel.text = hidden == 1
+                ? "1 CONTACT UNSEEN · MOVE TO LOOK"
+                : $"{hidden} CONTACTS UNSEEN · MOVE TO LOOK";
+            unseenContactsLabel.color = UITheme.Accent;
         }
 
         // --- Scan phase -------------------------------------------------------------------
@@ -375,10 +462,19 @@ namespace ScrapSiege.UI
 
         // --- Siege phase ------------------------------------------------------------------
 
+        /// <summary>
+        /// The standing Siege instruction. It used to read "Tap the table to deploy", which stopped
+        /// being true when deployment was restricted to the player's own lines - and a prompt that
+        /// contradicts the rule is worse than no prompt, because it turns a refused tap into
+        /// evidence that the game is broken. Named rather than repeated, since it is shown from two
+        /// places and the two had to be kept in step by hand.
+        /// </summary>
+        private const string SiegePrompt = "Deploy inside the blue zone. Break the enemy base.";
+
         private void HandleSiegeStarted()
         {
             SetPhase(Phase.Siege);
-            SetPrompt("Tap the table to deploy. Break the enemy base.");
+            SetPrompt(SiegePrompt);
         }
 
         /// <summary>Wire to the "Direct" segment.</summary>
@@ -440,7 +536,7 @@ namespace ScrapSiege.UI
             if (phase == Phase.Siege)
                 SetPrompt(armed
                     ? "Tap a lane to redirect every unit."
-                    : "Tap the table to deploy. Break the enemy base.");
+                    : SiegePrompt);
         }
 
         private void HandleRallyIssued(int unitsRedirected)
@@ -456,6 +552,145 @@ namespace ScrapSiege.UI
         public void ToggleRally()
         {
             if (rally != null) rally.ToggleArmed();
+        }
+
+        /// <summary>
+        /// Wire to the rally scope button. Cycles between commanding the whole army and commanding
+        /// only the class currently selected for deployment.
+        ///
+        /// <para>Deliberately a two-state toggle rather than a picker that walks the whole roster.
+        /// The player already chose a class on the deploy bar a second ago, so the scoped state can
+        /// simply mean "that one" - and one extra tap is the entire cost of the feature. A separate
+        /// class picker would be a second thing to keep in sync with the first for no added
+        /// expressiveness.</para>
+        /// </summary>
+        public void ToggleRallyScope()
+        {
+            if (rally == null) return;
+
+            bool wasScoped = rally.Scope != null;
+            rally.SetScope(wasScoped ? null : (deployment != null ? deployment.SelectedClass : null));
+
+            // SetScope early-returns when nothing changed (e.g. scoping to a null selection), so
+            // the label is refreshed here rather than relying only on the event.
+            HandleRallyScopeChanged(rally.ScopeLabel);
+        }
+
+        private void HandleRallyScopeChanged(string label)
+        {
+            if (rallyScopeLabel != null)
+            {
+                rallyScopeLabel.text = $"RALLY · {label}";
+                rallyScopeLabel.color = rally != null && rally.Scope != null
+                    ? UITheme.TextPrimary
+                    : UITheme.TextMuted;
+            }
+
+            bool scoped = rally != null && rally.Scope != null;
+            if (rallyScopeButton != null)
+            {
+                // Forced on every refresh, not just once. The scene shipped with this button
+                // authored non-interactable, which silently disabled the whole selective-rally
+                // feature: the label read "RALLY · ALL" forever because the only control that can
+                // change the scope could never be tapped. Nothing in the design ever wants this
+                // button disabled - widening an order back to the whole army is always legal - so
+                // the correct state is asserted here rather than trusted to the scene.
+                rallyScopeButton.interactable = true;
+
+                if (rallyScopeButton.targetGraphic is Image graphic)
+                    graphic.color = scoped ? UITheme.Accent : UITheme.SurfaceRaised;
+            }
+        }
+
+        private void HandleSelectedClassChanged(ScrapSiege.Siege.UnitClass unitClass)
+        {
+            // A scoped rally follows the deploy selection, so the label has to follow it too.
+            if (rally != null && rally.Scope != null) HandleRallyScopeChanged(rally.ScopeLabel);
+        }
+
+        // --- Transient prompts ---------------------------------------------------------------
+
+        private string standingPrompt = string.Empty;
+        private float transientPromptRemaining;
+
+        /// <summary>
+        /// A refused deploy has to say why, and line-of-sight refusals will be the most common
+        /// thing a new player hits - but the message must not stick, or the prompt line stops
+        /// describing what the player should be doing. Shown for a couple of seconds, then the
+        /// standing prompt returns.
+        /// </summary>
+        private void HandleDeployRejected(string reason)
+        {
+            if (promptLabel == null) return;
+
+            transientPromptRemaining = 2f;
+            promptLabel.text = reason;
+            promptLabel.color = UITheme.Danger;
+        }
+
+        private void TickTransientPrompt()
+        {
+            if (transientPromptRemaining <= 0f) return;
+
+            transientPromptRemaining -= Time.unscaledDeltaTime;
+            if (transientPromptRemaining > 0f) return;
+
+            if (promptLabel != null)
+            {
+                promptLabel.text = standingPrompt;
+                promptLabel.color = UITheme.TextPrimary;
+            }
+        }
+
+        // --- Navigation -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Wire to the in-match Menu button and to the outcome card's "Main Menu" button.
+        ///
+        /// <para>Without this there was genuinely no way out of a level: finishing one left the
+        /// player on the outcome card with only "Play Again", and abandoning one needed the OS back
+        /// gesture. Loading the menu scene (rather than trying to tear the match down in place) is
+        /// the same reasoning <see cref="RestartMatch"/> already uses - match state is spread across
+        /// the plane lock, the baked NavMesh, spawned terrain, the garrison and both armies, and a
+        /// second hand-written teardown path would be a second thing to keep correct.</para>
+        /// </summary>
+        public void ReturnToMainMenu()
+        {
+            if (string.IsNullOrEmpty(mainMenuSceneName))
+            {
+                Debug.LogError("HudController: Main Menu Scene Name is empty - the Menu button cannot go anywhere.", this);
+                return;
+            }
+
+            // Deliberately no GameAudio.Play here - see MainMenuController.GoToPage. UIButtonMotion
+            // already sounds every button press, so a second UiTap from the handler played as a
+            // double click.
+            UnityEngine.SceneManagement.SceneManager.LoadScene(mainMenuSceneName);
+        }
+
+        /// <summary>
+        /// Wire to the in-match Menu button when a confirmation is wanted. Falls straight through to
+        /// <see cref="ReturnToMainMenu"/> if no confirm panel is assigned, so the button always works.
+        /// </summary>
+        public void RequestReturnToMainMenu()
+        {
+            // Nothing to lose once the match is decided - the outcome card is already showing, so a
+            // "are you sure you want to quit?" over the top of "VICTORY" is pure friction.
+            bool matchOver = winPanel != null && winPanel.activeSelf;
+
+            if (quitConfirmPanel == null || matchOver)
+            {
+                ReturnToMainMenu();
+                return;
+            }
+
+            quitConfirmPanel.SetActive(true);
+        }
+
+        /// <summary>Wire to the confirmation panel's Cancel button.</summary>
+        public void CancelReturnToMainMenu()
+        {
+            if (quitConfirmPanel != null) quitConfirmPanel.SetActive(false);
         }
 
         // --- Outcome ----------------------------------------------------------------------
@@ -548,7 +783,16 @@ namespace ScrapSiege.UI
 
         private void SetPrompt(string text)
         {
-            if (promptLabel != null) promptLabel.text = text;
+            standingPrompt = text;
+
+            // A transient rejection message owns the prompt line until it expires. Without this a
+            // vantage tick or a phase change would wipe "No line of sight" off the screen before
+            // the player had a chance to read the one thing explaining why their tap did nothing.
+            if (transientPromptRemaining > 0f) return;
+
+            if (promptLabel == null) return;
+            promptLabel.text = text;
+            promptLabel.color = UITheme.TextPrimary;
         }
 
         /// <summary>
@@ -572,6 +816,7 @@ namespace ScrapSiege.UI
             SnapPanel(fortifyPanel, phase == Phase.Fortify);
             SnapPanel(placementPanel, phase == Phase.Placement);
             SnapPanel(siegePanel, phase == Phase.Siege);
+            SnapPanel(rosterPanel, phase == Phase.Siege);
             SnapPanel(resourceChip, phase == Phase.Siege);
         }
 

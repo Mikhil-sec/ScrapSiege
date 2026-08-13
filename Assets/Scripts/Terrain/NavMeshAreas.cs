@@ -56,10 +56,34 @@ namespace ScrapSiege.Terrain
         /// </summary>
         public static void ApplyCoverPreference(NavMeshAgent agent, bool preferCover)
         {
+            ApplyCoverPreference(agent, preferCover, 1f);
+        }
+
+        /// <summary>
+        /// As above, with a per-unit multiplier on the resulting cost.
+        ///
+        /// <para>Route variety's cheapest layer. The mode's base cost is the same number for every
+        /// agent, so two units deployed the same way and heading the same place price every polygon
+        /// identically and therefore receive the identical corner path - an army walking single
+        /// file, which is what the 2026-08-13 device test reported. Scaling the cost slightly per
+        /// unit makes them genuinely disagree about which side of an obstacle is worth it, so the
+        /// spread comes out of real pathfinding rather than out of positional noise.</para>
+        ///
+        /// <para>This can only ever change how *attractive* cover is, never whether it is passable -
+        /// the area mask is still <see cref="NavMesh.AllAreas"/> - so no amount of variance here can
+        /// disconnect a map, which is the failure mode the old areaMask-exclusion approach had.</para>
+        /// </summary>
+        public static void ApplyCoverPreference(NavMeshAgent agent, bool preferCover, float costMultiplier)
+        {
             if (agent == null) return;
 
+            float baseCost = preferCover ? CoverAreaCost : NeutralAreaCost;
+
             agent.areaMask = NavMesh.AllAreas;
-            agent.SetAreaCost(CoverAreaIndex, preferCover ? CoverAreaCost : NeutralAreaCost);
+            // Unity treats an area cost below 1 as "cheaper than open ground" and rejects negatives;
+            // the floor keeps a wild multiplier from producing a zero-cost polygon, which would make
+            // every path collapse onto cover regardless of distance.
+            agent.SetAreaCost(CoverAreaIndex, UnityEngine.Mathf.Max(0.01f, baseCost * costMultiplier));
         }
     }
 }

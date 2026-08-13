@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 62ddfb932b66eb64c8460261eb363ee0, type: 3}
+  m_Name: Trooper
+  m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Siege.UnitClass
+  displayName: Trooper
+  shortLabel: TRP
+  tagline: Cheap and balanced. The line you push with.
+  rosterOrder: 0
+  cost: 1
+  role: 0
+  health: 15
+  coverDamageMultiplier: 0.5
+  invisibleToSentries: 0
+  speedMultiplier: 1
+  engagementRadiusFraction: 0.06
+  attackTickSeconds: 0.5
+  attackDamage: 5
+  winnerRecoverySeconds: 0.8
+  evadesCombat: 0
+  damageToBase: 5
+  modelPrefab: {fileID: 0}
+  proModelPrefab: {fileID: 919132149155446097, guid: 6a788935889e23349bd4af188ecde1d0, type: 3}
+  modelScaleMultiplier: 1
+  silhouette: 0
+  accentColor: {r: 0.98, g: 0.62, b: 0.16, a: 1}
+  requiresPro: 0

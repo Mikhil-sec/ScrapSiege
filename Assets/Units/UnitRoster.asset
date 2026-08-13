@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 434be457a435ccd428019287c6b527ca, type: 3}
+  m_Name: UnitRoster
+  m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Siege.UnitRoster
+  classes:
+  - {fileID: 11400000, guid: ca5aaf3ff9028434683d32ed6257eff9, type: 2}
+  - {fileID: 11400000, guid: 65a268917a62cf844b794cd3b51c051b, type: 2}
+  - {fileID: 11400000, guid: a65a1ed1e53a3ee439316e69097e680e, type: 2}
+  - {fileID: 11400000, guid: cb864525a294ed342801a911b6e2edf1, type: 2}
+  - {fileID: 11400000, guid: 418cd65d9d0925948b62072aa1f41ba0, type: 2}
+  aiPicks:
+  - unitClass: {fileID: 11400000, guid: ca5aaf3ff9028434683d32ed6257eff9, type: 2}
+    weight: 5
+  - unitClass: {fileID: 11400000, guid: 65a268917a62cf844b794cd3b51c051b, type: 2}
+    weight: 2
+  - unitClass: {fileID: 11400000, guid: a65a1ed1e53a3ee439316e69097e680e, type: 2}
+    weight: 2
+  - unitClass: {fileID: 11400000, guid: cb864525a294ed342801a911b6e2edf1, type: 2}
+    weight: 1

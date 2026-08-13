@@ -14,6 +14,18 @@ namespace ScrapSiege.Audio
         PhaseChange,
         Victory,
         Defeat,
+
+        // Added with the unit-class pass. Each one currently falls back to the nearest existing
+        // synthesized recipe (see Build), so nothing is silent - but they are separate enum values
+        // precisely so a recorded clip can be dropped in for each independently. A marksman's shot
+        // and a sentry's shot sharing one sound is exactly the sort of thing that makes a game feel
+        // thin, and this is what lets that be fixed with a file rather than a code change.
+        MarksmanShot,
+        TurretFire,
+        HeavyDeploy,
+        StealthDeploy,
+        WaveIncoming,
+        ClassSelect,
     }
 
     /// <summary>
@@ -49,6 +61,18 @@ namespace ScrapSiege.Audio
                 case Sfx.PhaseChange: return BuildPhaseChange();
                 case Sfx.Victory: return BuildVictory();
                 case Sfx.Defeat: return BuildDefeat();
+
+                // Placeholders sharing an existing recipe. They exist as distinct enum values so a
+                // recorded clip can replace each one on its own (GameAudio.LoadOverride); until one
+                // is dropped in they deliberately sound like their nearest relative rather than
+                // being silent, which would read as a bug rather than as unfinished audio.
+                case Sfx.MarksmanShot: return BuildSentryFire();
+                case Sfx.TurretFire: return BuildSentryFire();
+                case Sfx.HeavyDeploy: return BuildDeploy();
+                case Sfx.StealthDeploy: return BuildDeploy();
+                case Sfx.WaveIncoming: return BuildPhaseChange();
+                case Sfx.ClassSelect: return BuildUiTap();
+
                 default: return null;
             }
         }

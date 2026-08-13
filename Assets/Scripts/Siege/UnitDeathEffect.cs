@@ -41,8 +41,14 @@ namespace ScrapSiege.Siege
             public bool Resting;
         }
 
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
+
         private readonly List<Piece> pieces = new List<Piece>();
         private readonly List<Material> ownedMaterials = new List<Material>();
+
+        /// <summary>The most-faded alpha any captured part was at. The fade's ceiling.</summary>
+        private float captureAlpha = 1f;
 
         private float lifetimeSeconds = 2f;
         private float fadeStartFraction = 0.55f;
@@ -149,16 +155,53 @@ namespace ScrapSiege.Siege
         /// Takes a private copy of each part's material so fading the debris cannot fade the living
         /// units that share the team-tint material. The copies are owned here and destroyed with the
         /// effect - the same ownership rule <see cref="VisionTarget"/> follows.
+        ///
+        /// <para><b>The copy is explicit, and that is the whole point.</b> Reading
+        /// <c>renderer.materials</c> does NOT guarantee a fresh instance: if something already
+        /// instanced this renderer's materials, Unity hands back those same instances. On enemy and
+        /// garrison units something always has - <see cref="VisionTarget"/> instances them on its
+        /// first fade so it can drive alpha per unit - and <see cref="VisionTarget.OnDestroy"/> then
+        /// destroys them a frame later, when the dying unit itself is destroyed. The debris was left
+        /// holding destroyed materials and rendered in Unity's magenta error material, which is
+        /// exactly the "enemy troops break into purple instead of their own colours" report from the
+        /// 2026-08-13 device test. Player units were unaffected only because they carry no
+        /// VisionTarget.</para>
+        ///
+        /// <para>So: copy from <c>sharedMaterials</c>, own the copies outright, and assign them back
+        /// through <c>sharedMaterials</c> (which assigns exactly what it is given rather than
+        /// instancing again). After this the debris shares no material with anything that outlives
+        /// it.</para>
         /// </summary>
         private void PrepareMaterials(Renderer renderer)
         {
-            var instances = renderer.materials;
-            foreach (var instance in instances)
+            var sources = renderer.sharedMaterials;
+            var copies = new Material[sources.Length];
+
+            for (int i = 0; i < sources.Length; i++)
             {
-                if (instance == null) continue;
-                MaterialFx.MakeTransparent(instance);
-                ownedMaterials.Add(instance);
+                if (sources[i] == null) continue;
+
+                var copy = new Material(sources[i]);
+
+                // A part inherits whatever alpha the vision system had it at. Fading from a hard 1
+                // would make a half-revealed enemy's debris pop to full opacity mid-burst - and
+                // worse, would show a player more of a unit dead than they were allowed to see of
+                // it alive. The captured alpha becomes the fade's ceiling instead.
+                captureAlpha = Mathf.Min(captureAlpha, AlphaOf(copy));
+
+                MaterialFx.MakeTransparent(copy);
+                copies[i] = copy;
+                ownedMaterials.Add(copy);
             }
+
+            renderer.sharedMaterials = copies;
+        }
+
+        private static float AlphaOf(Material material)
+        {
+            if (material.HasProperty(BaseColorId)) return material.GetColor(BaseColorId).a;
+            if (material.HasProperty(ColorId)) return material.GetColor(ColorId).a;
+            return 1f;
         }
 
         private void Update()
@@ -209,7 +252,7 @@ namespace ScrapSiege.Siege
             if (normalized < fadeStartFraction) return;
 
             float fade = Mathf.InverseLerp(fadeStartFraction, 1f, normalized);
-            float alpha = 1f - fade;
+            float alpha = (1f - fade) * captureAlpha;
 
             foreach (var material in ownedMaterials)
                 if (material != null) MaterialFx.SetAlpha(material, alpha);

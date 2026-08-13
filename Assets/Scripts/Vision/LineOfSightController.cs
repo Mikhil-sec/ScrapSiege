@@ -43,7 +43,20 @@ namespace ScrapSiege.Vision
         [SerializeField] private float ghostLifetimeSeconds = 6f;
 
         [SerializeField] private float ghostPeakAlpha = 0.45f;
-        [SerializeField] private float ghostSize = 0.05f;
+
+        [Tooltip("Ghost width as a fraction of the unit it stands for. Measured from that unit's own " +
+                 "renderers rather than typed in metres - see CreateGhost for why the old absolute " +
+                 "0.05m was reported from device as a giant red ball.")]
+        [Range(0.1f, 1.5f)]
+        [SerializeField] private float ghostWidthFraction = 0.55f;
+
+        [Tooltip("How flat the marker is. Below 1 it reads as a contact blip on the table rather " +
+                 "than as a unit or a projectile.")]
+        [Range(0.05f, 1f)]
+        [SerializeField] private float ghostFlatten = 0.3f;
+
+        [Tooltip("Fallback size in REAL metres, used only when a target has no measurable renderer.")]
+        [SerializeField] private float ghostFallbackSize = 0.02f;
 
         [Tooltip("Any opaque material using the active render pipeline - ghosts are instanced from " +
                  "this and forced transparent. Same pattern as TerrainObjectSpawner.baseMaterial, " +
@@ -58,6 +71,13 @@ namespace ScrapSiege.Vision
 
         private float tickTimer;
         private float lastTickTime;
+
+        /// <summary>
+        /// How many tracked targets are currently Hidden. Recomputed on the vision tick rather than
+        /// on demand, so the HUD reading it every frame costs nothing and can never disagree with
+        /// the reveal state the same pass just applied.
+        /// </summary>
+        public int HiddenTargetCount { get; private set; }
 
         private void Awake()
         {
@@ -92,6 +112,7 @@ namespace ScrapSiege.Vision
         private void Evaluate(float deltaTime)
         {
             Vector3 eye = arCamera.transform.position;
+            int hidden = 0;
 
             foreach (var target in VisionTarget.Active)
             {
@@ -105,16 +126,19 @@ namespace ScrapSiege.Vision
 
                 RevealTier tier = VisionMath.TierFromVisiblePoints(visible, samplePoints.Length);
                 target.ApplyTier(tier, VelocityOf(target), deltaTime);
+                if (tier == RevealTier.Hidden) hidden++;
 
                 UpdateGhost(target);
             }
 
+            HiddenTargetCount = hidden;
             CleanUpOrphanedGhosts();
         }
 
-        // nearClip and ghostSize are authored in REAL metres; the raycasts and the ghost both live in
-        // the scaled AR world, so they convert. An unconverted nearClip would be a fifth of its
-        // intended reach and stop protecting against the player's own held position clipping a wall.
+        // nearClip is authored in REAL metres and the raycasts live in the scaled AR world, so it
+        // converts. An unconverted nearClip would be a fifth of its intended reach and stop
+        // protecting against the player's own held position clipping a wall. (The ghost used to be
+        // converted here too; it is now measured from its target instead - see CreateGhost.)
         private bool HasClearLine(Vector3 eye, Vector3 point)
             => HasClearLine(eye, point, occluderMask, WorldScale.Metres(nearClip));
 
@@ -170,24 +194,47 @@ namespace ScrapSiege.Vision
 
             if (!ghosts.TryGetValue(target, out var ghost) || ghost == null)
             {
-                ghost = CreateGhost();
+                ghost = CreateGhost(target);
                 if (ghost == null) return;
                 ghosts[target] = ghost;
             }
 
             ghost.SetActive(true);
-            ghost.transform.position = VisionMath.DriftedGhostPosition(
+
+            // Sits at the height the marker's own flattened body needs to rest on the table, not at
+            // the unit's origin - a half-buried blip reads as a decal rather than as an object.
+            Vector3 drifted = VisionMath.DriftedGhostPosition(
                 target.LastSeenPosition,
                 target.LastSeenVelocity,
                 target.SecondsSinceSeen,
                 maxGhostDriftSeconds);
+            drifted.y += ghost.transform.localScale.y * 0.5f;
+            ghost.transform.position = drifted;
 
             float alpha = VisionMath.GhostAlpha(target.SecondsSinceSeen, ghostLifetimeSeconds, ghostPeakAlpha);
             var renderer = ghost.GetComponent<Renderer>();
             if (renderer != null) MaterialFx.SetAlpha(renderer.material, alpha);
         }
 
-        private GameObject CreateGhost()
+        /// <summary>
+        /// Builds the last-known-position marker for one target.
+        ///
+        /// <para><b>Sized from the target, not from a typed constant.</b> The old
+        /// <c>WorldScale.Metres(0.05f)</c> was a 5cm sphere - the same height as the entire trooper
+        /// it was standing in for - so on a small board it dominated the battlefield and was
+        /// reported from device as "a big red sphere", mistaken for a tracer round. Measuring the
+        /// unit it represents makes the marker correct at every board size for free, which is the
+        /// rule the rest of this project already follows (see UnitClassVisual and UnitAnimator, both
+        /// of which exist because a typed size on this prefab was wrong twice).</para>
+        ///
+        /// <para><b>Flattened on purpose.</b> A sphere is a shape the board otherwise uses for
+        /// nothing, but at unit size it still reads as a <i>thing</i> - a projectile or a unit.
+        /// Squashed to a disc lying on the table it reads as what it is: a mark on the map saying
+        /// "something was here". That distinction matters more than usual here, because this marker
+        /// is the feedback for Mechanic 2 and a player who thinks it is a bullet learns nothing
+        /// about leaning to look.</para>
+        /// </summary>
+        private GameObject CreateGhost(VisionTarget target)
         {
             if (ghostBaseMaterial == null)
             {
@@ -203,14 +250,38 @@ namespace ScrapSiege.Vision
             var collider = ghost.GetComponent<Collider>();
             if (collider != null) Destroy(collider);
 
-            ghost.transform.localScale = Vector3.one * WorldScale.Metres(ghostSize);
+            float width = MeasureTargetHeight(target) * ghostWidthFraction;
+            if (width <= 1e-5f) width = WorldScale.Metres(ghostFallbackSize);
+
+            ghost.transform.localScale = new Vector3(width, width * ghostFlatten, width);
 
             var renderer = ghost.GetComponent<Renderer>();
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+
             var material = new Material(ghostBaseMaterial) { color = ghostColor };
             MaterialFx.MakeTransparent(material);
             renderer.material = material;
 
             return ghost;
+        }
+
+        /// <summary>World-space height of whatever this target actually renders as. Zero if nothing does.</summary>
+        private static float MeasureTargetHeight(VisionTarget target)
+        {
+            if (target == null) return 0f;
+
+            bool any = false;
+            Bounds bounds = default;
+
+            foreach (var renderer in target.GetComponentsInChildren<Renderer>())
+            {
+                if (renderer == null || !renderer.enabled) continue;
+                if (!any) { bounds = renderer.bounds; any = true; }
+                else bounds.Encapsulate(renderer.bounds);
+            }
+
+            return any ? bounds.size.y : 0f;
         }
 
         /// <summary>Drops ghosts whose target has been destroyed, so the dictionary can't grow unbounded.</summary>

@@ -64,7 +64,34 @@ namespace ScrapSiege.Siege
 
         private void Awake()
         {
-            agent = GetComponent<NavMeshAgent>();
+            Bind();
+        }
+
+        /// <summary>
+        /// Re-finds the animated parts and re-caches their rest poses.
+        ///
+        /// <para>Called by <see cref="UnitClassVisual"/> after it swaps in a class's own model.
+        /// <see cref="Awake"/> runs at Instantiate, which is before the class is applied, so without
+        /// this the animator would keep driving the transforms of the hidden shared trooper body -
+        /// the new model would be rigid while an invisible one marched inside it.</para>
+        ///
+        /// <para>The serialized overrides are cleared first: they are populated by name lookup, so
+        /// leaving them pointing at the old body would make Bind's null checks skip the re-find
+        /// entirely. An Inspector-assigned reference on a class-model unit is not a supported
+        /// combination and would be a genuine authoring mistake.</para>
+        /// </summary>
+        public void Rebind()
+        {
+            body = null;
+            legLeft = null;
+            legRight = null;
+            weaponArm = null;
+            Bind();
+        }
+
+        private void Bind()
+        {
+            if (agent == null) agent = GetComponent<NavMeshAgent>();
 
             // Name lookup keeps this working straight off the Blender FBX import without needing
             // four Inspector drags on every prefab variant.

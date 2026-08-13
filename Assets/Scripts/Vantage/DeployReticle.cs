@@ -24,6 +24,28 @@ namespace ScrapSiege.Vantage
         [SerializeField] private ARRaycastManager raycastManager;
         [SerializeField] private VantageController vantage;
 
+        [Tooltip("The authored-level flow. When assigned, the reticle is intersected against the " +
+                 "board's own transform instead of an ARCore plane - see the note in Update.")]
+        [SerializeField] private ScrapSiege.Levels.LevelMatchController levelMatch;
+
+        [Tooltip("Camera the reticle is cast from. Optional - falls back to Camera.main.")]
+        [SerializeField] private Camera reticleCamera;
+
+        [Header("Line of sight")]
+        [Tooltip("Colour when the aimed point is behind terrain and therefore cannot be deployed " +
+                 "onto. Without this the line-of-sight rule is invisible until a tap is refused, " +
+                 "and 'my tap did nothing' is the hardest symptom in this project to diagnose.")]
+        [SerializeField] private Color blockedColor = new Color(0.90f, 0.30f, 0.28f);
+
+        [Tooltip("Colour when the aimed point is past the forward limit of the player's deploy zone. " +
+                 "Deliberately NOT the same red as a blocked sightline: one means 'move so you can " +
+                 "see it', the other means 'you can see it fine, it is simply not your ground', and " +
+                 "a player who reads them as the same refusal learns the wrong lesson from both.")]
+        [SerializeField] private Color outOfZoneColor = new Color(0.55f, 0.56f, 0.62f);
+
+        [SerializeField] private LayerMask sightBlockerMask = 1 << ScrapSiege.Core.SiegeLayers.TerrainOccluder;
+        [SerializeField] private float sightNearClip = 0.02f;
+
         [Tooltip("Any material using the active render pipeline - instanced and forced transparent.")]
         [SerializeField] private Material baseMaterial;
 
@@ -51,7 +73,8 @@ namespace ScrapSiege.Vantage
             // Only meaningful during Siege; SiegePhaseController enables this alongside deployment.
             enabled = false;
 
-            if (raycastManager == null) Debug.LogError("DeployReticle: Raycast Manager is not assigned - the reticle can never find the table.", this);
+            if (raycastManager == null && levelMatch == null)
+                Debug.LogError("DeployReticle: neither Raycast Manager nor Level Match is assigned - the reticle can never find the table.", this);
             if (vantage == null) Debug.LogError("DeployReticle: Vantage Controller is not assigned - the reticle cannot show deploy precision.", this);
         }
 
@@ -68,22 +91,32 @@ namespace ScrapSiege.Vantage
 
         private void Update()
         {
-            if (raycastManager == null || vantage == null) return;
+            if (vantage == null) return;
 
             var screenCentre = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
-            if (!raycastManager.Raycast(screenCentre, hits, TrackableType.PlaneWithinPolygon))
+            if (!TryResolveAimPoint(screenCentre, out Vector3 point))
             {
                 if (ring != null) ring.SetActive(false);
                 return;
             }
-
-            Vector3 point = hits[0].pose.position;
 
             // Show where the unit would actually end up. Off-NavMesh aim points are rejected by
             // UnitDeploymentController anyway, so dimming here tells the player "this tap will do
             // nothing" before they waste a resource on it.
             bool walkable = NavMesh.SamplePosition(point, out NavMeshHit navHit, 0.15f, NavMesh.AllAreas);
             if (walkable) point = navHit.position;
+
+            // The other half of the same promise: UnitDeploymentController refuses a point it has no
+            // sightline to, so the reticle has to show that BEFORE the tap. Checked against the same
+            // static rule the reveal system uses, for the same reason - two implementations of "can I
+            // see this" would drift, and both fail silently when they do.
+            bool visible = !walkable || HasSightlineTo(point);
+
+            // And the third refusal the player has to be able to see coming: reinforcements arrive
+            // from your own lines only. The board draws the zone; this says "the thing you are
+            // aiming at right now is outside it" without the player having to compare the reticle
+            // against a painted line by eye.
+            bool inZone = levelMatch == null || levelMatch.IsInDeployZone(point);
 
             if (!EnsureRing()) return;
 
@@ -97,9 +130,76 @@ namespace ScrapSiege.Vantage
             ring.transform.localScale = new Vector3(radius, 1f, radius);
 
             Color target = Color.Lerp(preciseColor, looseColor, vantage.Vantage01);
-            if (!walkable) target = Color.Lerp(target, Color.gray, 0.7f);
-            MaterialFx.SetAlpha(ringMaterial, walkable ? alpha : alpha * 0.4f);
-            ringMaterial.color = new Color(target.r, target.g, target.b, walkable ? alpha : alpha * 0.4f);
+            if (!inZone) target = outOfZoneColor;
+            else if (!visible) target = blockedColor;
+            else if (!walkable) target = Color.Lerp(target, Color.gray, 0.7f);
+
+            float drawnAlpha = walkable && inZone ? alpha : alpha * 0.4f;
+            MaterialFx.SetAlpha(ringMaterial, drawnAlpha);
+            ringMaterial.color = new Color(target.r, target.g, target.b, drawnAlpha);
+        }
+
+        /// <summary>
+        /// Where the device is aimed on the table.
+        ///
+        /// <para>Intersects the placed board's own transform, mirroring the fix already applied to
+        /// <see cref="ScrapSiege.Siege.UnitDeploymentController"/> and
+        /// <see cref="ScrapSiege.Siege.RallyController"/>. This was the third component still
+        /// requiring a <c>PlaneWithinPolygon</c> AR hit, on a device confirmed to track fine while
+        /// never promoting anything to a plane - so on the Tab S6 Lite the precision ring, the one
+        /// thing that makes the vantage mechanic legible, would simply never have appeared.</para>
+        /// </summary>
+        private bool TryResolveAimPoint(Vector2 screenPos, out Vector3 point)
+        {
+            Transform board = levelMatch != null ? levelMatch.BoardRoot : null;
+            Camera cam = ResolveCamera();
+
+            if (board != null && cam != null)
+            {
+                var plane = new Plane(board.up, board.position);
+                Ray ray = cam.ScreenPointToRay(screenPos);
+                if (plane.Raycast(ray, out float distance))
+                {
+                    Vector3 hit = ray.GetPoint(distance);
+                    Vector3 local = board.InverseTransformPoint(hit);
+                    if (Mathf.Abs(local.x) <= 0.5f && Mathf.Abs(local.z) <= 0.5f)
+                    {
+                        point = hit;
+                        return true;
+                    }
+                }
+
+                point = default;
+                return false;
+            }
+
+            if (raycastManager != null && raycastManager.Raycast(screenPos, hits, TrackableType.PlaneWithinPolygon))
+            {
+                point = hits[0].pose.position;
+                return true;
+            }
+
+            point = default;
+            return false;
+        }
+
+        private bool HasSightlineTo(Vector3 point)
+        {
+            Camera cam = ResolveCamera();
+            if (cam == null) return true;
+
+            float lift = ScrapSiege.Core.WorldScale.Metres(0.005f);
+            return LineOfSightController.HasClearLine(
+                cam.transform.position,
+                point + Vector3.up * lift,
+                sightBlockerMask,
+                ScrapSiege.Core.WorldScale.Metres(sightNearClip));
+        }
+
+        private Camera ResolveCamera()
+        {
+            if (reticleCamera == null) reticleCamera = Camera.main;
+            return reticleCamera;
         }
 
         private bool EnsureRing()

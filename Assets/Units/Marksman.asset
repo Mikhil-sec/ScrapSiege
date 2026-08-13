@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 62ddfb932b66eb64c8460261eb363ee0, type: 3}
+  m_Name: Marksman
+  m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Siege.UnitClass
+  displayName: Marksman
+  shortLabel: MKS
+  tagline: Outranges everything on the board. Helpless once they close.
+  rosterOrder: 2
+  cost: 2
+  role: 1
+  health: 10
+  coverDamageMultiplier: 0.6
+  invisibleToSentries: 0
+  speedMultiplier: 0.9
+  engagementRadiusFraction: 0.34
+  attackTickSeconds: 0.75
+  attackDamage: 4
+  winnerRecoverySeconds: 0.9
+  evadesCombat: 0
+  damageToBase: 5
+  modelPrefab: {fileID: 919132149155446097, guid: 99bc2f4975bac1a4d974a11fa4c9c84f, type: 3}
+  proModelPrefab: {fileID: 919132149155446097, guid: e5c334b6f1d62584aa8f59f35a4f627a, type: 3}
+  modelScaleMultiplier: 0.95
+  silhouette: 2
+  accentColor: {r: 0.62, g: 0.9, b: 0.35, a: 1}
+  requiresPro: 0

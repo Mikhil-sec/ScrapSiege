@@ -57,8 +57,8 @@ MonoBehaviour:
   playerBasePosition: {x: 0.5, y: 0.07}
   enemyBasePosition: {x: 0.5, y: 0.93}
   startingResources: 4
-  playerBaseHealth: 10
-  enemyBaseHealth: 10
+  playerBaseHealth: 50
+  enemyBaseHealth: 50
   maxGarrisonUnits: 2
   parTimeSeconds: 140
   parUnitsLost: 5

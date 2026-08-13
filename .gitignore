@@ -117,3 +117,8 @@ InitTestScene*.unity*
 *CREDENTIALS*
 google-services.json
 GoogleService-Info.plist
+
+# Unity crash-recovery snapshots. Stale duplicates of real scenes (Assets/_Recovery/0.unity
+# is an old copy of ARTest) - never wanted in a public repo, and confusing to grep against.
+Assets/_Recovery/
+Assets/_Recovery.meta

@@ -38,6 +38,20 @@ namespace ScrapSiege.UI
         [Tooltip("Template card, disabled in the scene and cloned per level.")]
         [SerializeField] private GameObject levelCardTemplate;
 
+        [Header("Level select paging")]
+        [Tooltip("Cards per page. The list is laid out in a fixed-height row inside a 1080-tall " +
+                 "landscape canvas, so beyond about four the cards stop being tappable - which is " +
+                 "why this is paged rather than scrolled: a page is a definite place a player can " +
+                 "return to, and it needs no scroll inertia tuning on a device that is also being " +
+                 "held up to a table.")]
+        [SerializeField] private int levelsPerPage = 4;
+
+        [SerializeField] private Button previousPageButton;
+        [SerializeField] private Button nextPageButton;
+
+        [Tooltip("Reads 'PAGE 1 / 3'. Optional.")]
+        [SerializeField] private TMP_Text pageLabel;
+
         [Header("Paywall")]
         [SerializeField] private GameObject paywallPanel;
 
@@ -50,6 +64,8 @@ namespace ScrapSiege.UI
         [SerializeField] private GameObject goProButton;
 
         private readonly List<GameObject> spawnedCards = new List<GameObject>();
+        private readonly List<LevelDefinition> orderedLevels = new List<LevelDefinition>();
+        private int pageIndex;
 
         private void Awake()
         {
@@ -112,8 +128,43 @@ namespace ScrapSiege.UI
             if (levelSelectScreen != null) levelSelectScreen.SetActive(true);
 
             // Rebuilt on every entry rather than cached, so returning from a purchase immediately
-            // reflects newly unlocked Pro levels without a restart.
+            // reflects newly unlocked Pro levels without a restart. Paging deliberately resets to
+            // the first page: coming back from a match to page 3 with no memory of why is more
+            // disorienting than a page turn is expensive.
+            pageIndex = 0;
             BuildLevelList();
+        }
+
+        /// <summary>Wire to the level list's next-page button.</summary>
+        public void NextPage() => GoToPage(pageIndex + 1);
+
+        /// <summary>Wire to the level list's previous-page button.</summary>
+        public void PreviousPage() => GoToPage(pageIndex - 1);
+
+        private void GoToPage(int index)
+        {
+            int pages = PageCount();
+            int clamped = Mathf.Clamp(index, 0, Mathf.Max(0, pages - 1));
+            if (clamped == pageIndex) return;
+
+            pageIndex = clamped;
+
+            // No click sound here. UIButtonMotion.OnPointerDown already plays Sfx.UiTap for every
+            // button in the game, so playing it again from the handler fired two identical taps a
+            // few milliseconds apart - which reads as a stutter/bug, not as feedback. The rule for
+            // this project: button *press* audio belongs to UIButtonMotion and nowhere else; a
+            // handler may only add a sound that is different from the tap.
+            BuildLevelList();
+        }
+
+        private int PerPage() => Mathf.Max(1, levelsPerPage);
+
+        private int PageCount()
+        {
+            int count = orderedLevels.Count;
+            if (count == 0) return 1;
+
+            return Mathf.CeilToInt(count / (float)PerPage());
         }
 
         private void BuildLevelList()
@@ -124,8 +175,24 @@ namespace ScrapSiege.UI
 
             if (catalog == null || levelCardTemplate == null || levelListParent == null) return;
 
+            // Re-read the catalog each build rather than caching at Awake, so a level added to the
+            // asset while the menu is open still appears - and so the page count can never be based
+            // on a list that has since changed length.
+            orderedLevels.Clear();
             foreach (var level in catalog.Levels)
+                if (level != null) orderedLevels.Add(level);
+
+            // A catalog that shrinks (or a levelsPerPage edited upward) can leave pageIndex past the
+            // end, which would render an empty page with no obvious way back.
+            pageIndex = Mathf.Clamp(pageIndex, 0, Mathf.Max(0, PageCount() - 1));
+
+            int first = pageIndex * PerPage();
+            int last = Mathf.Min(first + PerPage(), orderedLevels.Count);
+
+            for (int i = first; i < last; i++)
             {
+                LevelDefinition level = orderedLevels[i];
+
                 var card = Instantiate(levelCardTemplate, levelListParent);
                 card.name = $"Card_{level.levelNumber}_{level.displayName}";
                 card.SetActive(true);
@@ -133,6 +200,31 @@ namespace ScrapSiege.UI
 
                 bool unlocked = LevelCatalog.IsUnlocked(level);
                 PopulateCard(card, level, unlocked);
+            }
+
+            ApplyPagingState();
+        }
+
+        private void ApplyPagingState()
+        {
+            int pages = PageCount();
+
+            if (pageLabel != null)
+                pageLabel.text = pages <= 1 ? string.Empty : $"PAGE {pageIndex + 1} / {pages}";
+
+            // Left interactable-but-disabled rather than hidden. A control that appears and vanishes
+            // as the player pages reflows the row it sits in, which on a fixed-height bar moves
+            // everything else under the player's thumb between taps.
+            if (previousPageButton != null)
+            {
+                previousPageButton.gameObject.SetActive(pages > 1);
+                previousPageButton.interactable = pageIndex > 0;
+            }
+
+            if (nextPageButton != null)
+            {
+                nextPageButton.gameObject.SetActive(pages > 1);
+                nextPageButton.interactable = pageIndex < pages - 1;
             }
         }
 

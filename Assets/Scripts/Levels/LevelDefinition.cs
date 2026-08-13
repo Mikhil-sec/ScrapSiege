@@ -38,6 +38,15 @@ namespace ScrapSiege.Levels
         [Range(0.3f, 1f)]
         public float boardAspect = 0.6f;
 
+        [Tooltip("Multiplies every terrain piece's height on this map. 1 is the standard table " +
+                 "(Short/Medium/Tall = 5.5% / 13% / 22% of board length). Raise it for a map built " +
+                 "around not being able to see across the board - which is the AR mechanic's whole " +
+                 "point, and something a level should be able to lean on harder than the default. " +
+                 "Height affects sight and silhouette ONLY; terrain carves the NavMesh by footprint, " +
+                 "so raising this cannot sever a route.")]
+        [Range(0.5f, 2.5f)]
+        public float terrainHeightScale = 1f;
+
         [Header("Layout (normalised 0..1, z=0 is the player's edge)")]
         public TerrainPlacement[] terrain = Array.Empty<TerrainPlacement>();
 
@@ -46,8 +55,8 @@ namespace ScrapSiege.Levels
 
         [Header("Balance")]
         public int startingResources = 3;
-        public int playerBaseHealth = 10;
-        public int enemyBaseHealth = 10;
+        public int playerBaseHealth = 50;
+        public int enemyBaseHealth = 50;
 
         [Tooltip("Chokepoint/Watchtower terrain spawns a free defending sentry, capped here.")]
         public int maxGarrisonUnits = 3;

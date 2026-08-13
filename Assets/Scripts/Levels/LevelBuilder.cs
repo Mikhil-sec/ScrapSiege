@@ -41,6 +41,20 @@ namespace ScrapSiege.Levels
         [Tooltip("Depth of each coloured end zone as a fraction of board length.")]
         [SerializeField] private float endZoneDepth = 0.12f;
 
+        [Tooltip("How far forward of the player's own edge a unit may be deployed, as a fraction of " +
+                 "board length. This is the ONE number the rule and the drawn zone both come from - " +
+                 "UnitDeploymentController reads it back through LevelMatchController, so the band " +
+                 "the player can see is exactly the ground the game will accept a tap on.")]
+        [Range(0.05f, 0.9f)]
+        [SerializeField] private float deployZoneDepth = 0.30f;
+
+        [Tooltip("The bright line marking the forward limit of the deploy zone, as a fraction of " +
+                 "board length. Purely visual.")]
+        [SerializeField] private float deployLimitLineWidth = 0.006f;
+
+        [SerializeField] private Color deployZoneColor = new Color(0.16f, 0.30f, 0.52f);
+        [SerializeField] private Color deployLimitColor = new Color(0.42f, 0.72f, 1f);
+
         [Tooltip("Base footprint as a fraction of board length. The prefab's own scale is ignored so " +
                  "the objective stays proportionate on any board size.")]
         [SerializeField] private float baseFootprint = 0.13f;
@@ -55,6 +69,30 @@ namespace ScrapSiege.Levels
         public BaseHealth EnemyBaseHealth { get; private set; }
         public Transform PlayerBase { get; private set; }
         public BaseHealth PlayerBaseHealth { get; private set; }
+
+        /// <summary>
+        /// How far forward of the player's own edge (board-local z = -0.5) a deploy tap is allowed,
+        /// as a fraction of board length. Read by <see cref="ScrapSiege.Siege.UnitDeploymentController"/>
+        /// and <see cref="ScrapSiege.Vantage.DeployReticle"/> so the drawn zone and the enforced rule
+        /// can never drift apart.
+        /// </summary>
+        public float DeployZoneDepth => Mathf.Clamp(deployZoneDepth, 0.02f, 1f);
+
+        /// <summary>
+        /// True when <paramref name="boardLocal"/> (a point already in the board root's local space)
+        /// is inside the player's deploy zone.
+        ///
+        /// <para>The player's own edge is local -z by construction: <see cref="BuildBoardSurface"/>
+        /// draws PlayerEndZone there and <see cref="LevelDefinition.ToBoardLocal"/> maps the
+        /// normalised y of <c>playerBasePosition</c> (0.08 on every shipped level) onto it. Stated
+        /// here once rather than re-derived per caller.</para>
+        /// </summary>
+        public bool IsInDeployZone(Vector3 boardLocal)
+        {
+            return boardLocal.z <= -0.5f + DeployZoneDepth
+                   && boardLocal.z >= -0.5f
+                   && Mathf.Abs(boardLocal.x) <= 0.5f;
+        }
 
         private void Awake()
         {
@@ -173,7 +211,48 @@ namespace ScrapSiege.Levels
             MakeBoardPiece(boardRoot, "EnemyEndZone", enemyZoneColor,
                 new Vector3(aspect, lift, endZoneDepth), new Vector3(0f, lift * 0.5f, half));
 
+            BuildDeployZone(aspect, boardRoot, lift);
+
             if (slab != null) slab.transform.SetSiblingIndex(0);
+        }
+
+        /// <summary>
+        /// Draws the ground a unit may actually be deployed onto.
+        ///
+        /// <para><b>Why this is a piece of board art and not just a rule.</b> Deployment used to
+        /// accept any tap anywhere on the board, up to and including the square the enemy base
+        /// stands on - which made every route, every piece of cover and the whole Covered/Direct
+        /// choice optional, because you could simply drop a unit on the objective. Restricting it is
+        /// the fix, but an invisible restriction reads as "my tap did nothing", which is this
+        /// project's most expensive class of bug. So the enforced zone gets drawn, from the same
+        /// number that enforces it.</para>
+        ///
+        /// <para>The band starts at the FRONT of the coloured player end zone, so the two read as one
+        /// staging area rather than two competing stripes, and it ends in a bright line that says
+        /// where the ground stops being yours.</para>
+        /// </summary>
+        private void BuildDeployZone(float aspect, Transform boardRoot, float lift)
+        {
+            float limit = -0.5f + DeployZoneDepth;
+            float bandStart = -0.5f + endZoneDepth;
+
+            // A deploy zone shallower than the end zone would draw a zero- or negative-depth band.
+            // The end zone is then already the whole staging area and no extra band is needed.
+            // Every zone piece is `lift` tall and centred at lift*0.5, so it spans exactly 0..lift
+            // and cannot z-fight the slab's top face - the same trick the end zones use.
+            float bandDepth = limit - bandStart;
+            if (bandDepth > 0.001f)
+            {
+                MakeBoardPiece(boardRoot, "DeployZone", deployZoneColor,
+                    new Vector3(aspect, lift, bandDepth),
+                    new Vector3(0f, lift * 0.5f, bandStart + bandDepth * 0.5f));
+            }
+
+            // The limit line straddles the band's forward edge, so it is the one piece that DOES
+            // overlap another in z. It gets its own storey rather than a nudged offset.
+            MakeBoardPiece(boardRoot, "DeployLimit", deployLimitColor,
+                new Vector3(aspect, lift, Mathf.Max(0.001f, deployLimitLineWidth)),
+                new Vector3(0f, lift * 1.5f, limit));
         }
 
         private GameObject MakeBoardPiece(Transform boardRoot, string name, Color color, Vector3 localScale, Vector3 localPosition)
@@ -222,7 +301,8 @@ namespace ScrapSiege.Levels
                 // Heights scale with the board exactly like footprints already do, so a level looks
                 // the same on a coffee table and a dining table. The spawner's fixed metre-based
                 // category table belongs to the scan flow, where it describes a real measured object.
-                HeightOverrideMetres = TerrainObjectSpawner.NormalisedHeightForCategory(placement.height) * boardLength,
+                HeightOverrideMetres = TerrainObjectSpawner.NormalisedHeightForCategory(placement.height)
+                                       * boardLength * level.terrainHeightScale,
             };
 
             data.Visual = terrainSpawner.Spawn(data);

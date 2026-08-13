@@ -452,14 +452,29 @@ namespace ScrapSiege.Terrain
         /// Short is knee-high cover, Medium hides a standing unit, Tall reads as a landmark. The
         /// absolute values above cannot be reused here - a fixed 0.30m "Tall" piece on a 0.60m board
         /// is half the board's own length, which is what made authored maps look so wrong.
+        ///
+        /// <para><b>Raised across the board 2026-08-11, and this is a gameplay change, not a
+        /// cosmetic one.</b> At the old values a Tall piece was 7.8cm on a 0.60m board against a
+        /// 5.2cm unit - only half a unit taller than the thing it was meant to hide. Held at any
+        /// normal viewing angle the player looked straight over everything, so line of sight almost
+        /// never actually blocked, the whole board was legible from one standing position, and
+        /// Mechanic 2 was a system that ran every frame and changed nothing. At 0.22 a Tall piece is
+        /// 13cm - two and a half units - and a lane behind one is genuinely dark until the player
+        /// physically moves. Medium now hides a unit outright rather than nearly, which is what it
+        /// always claimed to do.</para>
+        ///
+        /// <para>Nothing about pathing changes: terrain carves the NavMesh by footprint, and height
+        /// is not part of that. The costs are visual - a tall piece occludes more of the board on
+        /// screen, which is the intended effect - and level authoring, since a Tall piece is now a
+        /// much stronger statement.</para>
         /// </summary>
         public static float NormalisedHeightForCategory(HeightCategory category)
         {
             switch (category)
             {
-                case HeightCategory.Short: return 0.035f;
-                case HeightCategory.Tall: return 0.130f;
-                default: return 0.070f;
+                case HeightCategory.Short: return 0.055f;
+                case HeightCategory.Tall: return 0.220f;
+                default: return 0.130f;
             }
         }
 
