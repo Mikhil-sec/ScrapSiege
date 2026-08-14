@@ -94,10 +94,20 @@ public class PaywallController : MonoBehaviour
 
         manager.FetchOfferings((offerings, error) =>
         {
+            // Both failure paths below are what a build installed OUTSIDE Google Play hits, and
+            // that is the normal case for this project now: the Shipaton Next Gen track needs no
+            // store release, so the shipped artifact is a sideloaded APK. Google Play Billing only
+            // serves product details to a package Play itself installed and licensed, so with the
+            // real `goog_` key an off-Play build gets either an error here or an empty offering.
+            // Neither is a bug, and the message must not read like one to whoever is holding the
+            // phone - previously both said a flat "unavailable", which looks like a broken paywall
+            // rather than an expected consequence of how the build was delivered. The wording stays
+            // honest about the other real cause (no connection) instead of asserting the install
+            // source, which the client cannot actually determine here.
             if (error != null)
             {
                 SetPrice("--");
-                SetStatus("Offer unavailable right now.");
+                SetStatus("Store unavailable. Subscribing needs a Google Play install + connection.");
                 Debug.LogError($"PaywallController: GetOfferings failed - {error.Message}");
                 return;
             }
@@ -106,7 +116,8 @@ public class PaywallController : MonoBehaviour
             if (monthlyPackage == null)
             {
                 SetPrice("--");
-                SetStatus("No offer configured.");
+                SetStatus("Store unavailable. Subscribing needs a Google Play install + connection.");
+                Debug.LogWarning("PaywallController: offerings resolved but the current offering has no monthly package. Expected when the build was not installed from Google Play (Play Billing returns no product details to an unlicensed package); otherwise check the dashboard offering.");
                 return;
             }
 

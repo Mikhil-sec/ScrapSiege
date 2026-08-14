@@ -1,9 +1,9 @@
 # Privacy Policy
 
-**The authoritative text is [`docs/privacy/index.html`](privacy/index.html)**, published at
-<https://mikhil-sec.github.io/ScrapSiege/privacy/> and submitted to Google Play as the app's
-privacy-policy URL. This file is a pointer and a summary — if the two ever disagree, the HTML page
-is the one that governs, and the disagreement is a bug to fix.
+**The authoritative text is [`docs/privacy/index.html`](privacy/index.html)**, a self-contained page
+ready to serve from GitHub Pages at `https://mikhil-sec.github.io/ScrapSiege/privacy/` if Pages is
+ever enabled on `main` / `/docs`. This file is a pointer and a summary — if the two ever disagree,
+the HTML page is the one that governs, and the disagreement is a bug to fix.
 
 Last updated: 14 August 2026.
 
@@ -27,9 +27,15 @@ servers of its own. In short:
 
 ## Why this file exists
 
-Google Play requires a public privacy-policy URL for any app with in-app purchases, checked before
-the production track. It is a hosted page plus a Play Console field, so nothing in the code can
-satisfy it — see the closed-testing checklist in the root `README.md`.
+Originally, because Google Play requires a public privacy-policy URL for any app with in-app
+purchases. **That requirement no longer applies to this project:** Scrap Siege is submitted to
+Shipaton's Next Gen track, which needs no store release, so there is no Play Console field to fill
+(see `plan.md` Section 16 and the submission checklist in the root `README.md`).
+
+It is kept anyway, and kept accurate, because the reasons that survive the change are the real ones:
+the app takes actual money through a real Google Play Billing + RevenueCat integration, and this
+repository is a judged artifact that a stranger reads. Publishing the page to GitHub Pages is now
+optional polish rather than a requirement.
 
 ## Maintaining it
 

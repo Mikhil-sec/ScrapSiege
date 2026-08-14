@@ -1166,6 +1166,85 @@ A checklist item now exists in `SECURITY.md` to keep them in step, because the f
 a package added later that injects a permission would make the shipped policy understate the app
 without anyone editing the policy.
 
-**What is deliberately left for the user**, because none of it is code: creating the support address
-and replacing the single `CONTACT_EMAIL_PLACEHOLDER` token, enabling GitHub Pages, pasting the URL
-into Play Console, and completing the Data Safety form so its answers match the policy.
+**Status after the 2026-08-14 strategy change (Section 16):** the contact address
+`miksdevstudio@gmail.com` is filled in and the policy is complete. With no store release there is no
+Play Console field to paste a URL into and no Data Safety form to complete, so the policy is **no
+longer a blocker on anything**. It is kept, and kept accurate, for two reasons that survive the
+change: the app genuinely does take money through a real billing integration, and the repository is
+itself a judged artifact. Hosting it on GitHub Pages is now optional polish rather than a
+requirement.
+
+---
+
+## Section 16 — Submission route: Next Gen only, no store release (decided 2026-08-14)
+
+### The decision
+
+Scrap Siege is submitted **only** to the Shipaton 2026 **Next Gen** (student) award. The Google Play
+production route — closed testing with 12 testers for 14 days, the Data Safety form, store listing
+assets, production review — is **abandoned for this project**. The user is directing that effort at a
+separate app better suited to the Influencer award, which does need a public listing.
+
+### Why this is safe, and the rule that makes it safe
+
+Every other Shipaton track requires that *"the first public version of the Project must be released
+during the Submission Period"* on the App Store, Google Play or the Galaxy Store, and the rules are
+explicit that a closed or internal test does **not** count. Skipping publication would therefore
+disqualify the entry outright — **except** on Next Gen, whose rules state that **"no paid Apple or
+Google developer account or store release is required"**, replacing publication with *"a demo video
+and a link to your public, open-source code repository, including an open-source license file."*
+
+**Verified against the official rules on 2026-08-14 before any work was done on this basis**, because
+the failure mode is total: the difference between "exempt" and "disqualified" is one clause.
+
+Two conditions come attached and neither is satisfiable from the repository:
+
+1. **Active student enrolment**, and
+2. **a qualifying student or academic email address on the Devpost account.**
+
+The RevenueCat SDK requirement is **not** waived — the app must still "thoughtfully use RevenueCat to
+support subscriptions, in-app purchases, web purchases, ads, or another monetization flow."
+
+### Why the Test Store is NOT adopted, despite being the obvious fit
+
+The intuition was to swap the `goog_` key for the project's Test Store key
+(`appda5538b8e2`), which would let a sideloaded build show a working purchase flow with no store
+involvement. The dashboard is already configured for it: the `default` offering's `$rc_monthly`
+package (`pkgef5eaf57c5e`) has **both** the Play product (`prod759b1f896f`) and the Test Store product
+(`prod82922bec23`) attached, so the offering would resolve for either key with no dashboard change.
+
+**It is not possible on the current SDK.** RevenueCat requires **purchases-android 9.9.0+** for Test
+Store products. This project is on `com.revenuecat.purchases-unity` **7.4.1**, which resolves
+`com.revenuecat.purchases:purchases-hybrid-common:[13.14.0]` — the 8.x native line — and a search of
+the installed package returns **zero** Test Store references. Adopting it therefore means the major
+SDK upgrade deferred in Section 11, not a key swap.
+
+**And it would be a downgrade even if it were free.** The entry requirement is already met with
+something strictly better: a real subscription, bought with real money on real hardware, granting a
+real entitlement, with the transactions visible in the RevenueCat dashboard. A judge watching the
+demo video sees an actual Google Play purchase unlock Pro. Replacing that with a simulated purchase
+to serve a scenario the judging criteria do not require would trade proven evidence for a risk to the
+one requirement that must hold.
+
+**Decision: keep SDK 7.4.1 and the real `goog_` key. Do not upgrade, do not switch stores.**
+
+### What the change actually cost in code
+
+Almost nothing, which is the point — the pivot removes planned work rather than adding it. Two edits:
+
+- **`LICENSE`** (new, MIT) — required explicitly by the Next Gen rules and previously absent, which
+  would have been a submission defect regardless of the store decision.
+- **`PaywallController.LoadOffering`** — both failure paths now read *"Store unavailable. Subscribing
+  needs a Google Play install + connection."* Play Billing only serves product details to a package
+  Play installed and licensed, so an off-Play build gets an error or an empty offering; with no store
+  release that is now the *normal* path for anyone who installs the APK directly. The old flat
+  "Offer unavailable right now." read as a broken paywall rather than a consequence of delivery. The
+  wording deliberately does not assert the install source, which the client cannot determine.
+
+### What this makes more important, not less
+
+With no store listing, **the demo video is the only way a judge sees the game run.** It stops being
+the last polish item and becomes the primary deliverable — still recorded last, per the standing
+instruction, but no longer optional and no longer something to leave to the final days. The public
+repository is the other half of the submission and is judged directly, which is the standing
+justification for the readability of this file and of `CLAUDE.md`.

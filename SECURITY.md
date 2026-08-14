@@ -61,6 +61,13 @@ embedded token, or a signing credential.
 
 ### B. Before every Play Console upload
 
+> **Dormant as of 2026-08-14 — but do not delete it.** Scrap Siege is submitted to Shipaton's Next
+> Gen track, which needs no store release, so no further Play Console uploads are planned
+> (`plan.md` Section 16). Every item below still applies to any signed release artifact — including
+> the build used to record the demo video, which is installed from Play — and would apply again
+> immediately if the store route were ever resumed. The signing, debuggable and permission checks are
+> release-build hygiene, not Play-specific paperwork.
+
 - [ ] Build is a **release** build, not a development build. Verify on the artifact itself:
       `aapt2 dump xmltree <apk> --file AndroidManifest.xml | grep debuggable`
       → must return **nothing**. `debuggable=true` is both a Play rejection and a real vulnerability.
@@ -223,9 +230,16 @@ declared permissions, the absence of any analytics/ads SDK, the `PlayerPrefs` ke
 `MonetizationManager` never calls `LogIn` or sets subscriber attributes (so RevenueCat only ever sees
 its own anonymous ID) were each checked before being asserted publicly.
 
-**Still to do, and none of it is code:** enable GitHub Pages (`main` / `/docs`), replace the single
-`CONTACT_EMAIL_PLACEHOLDER` token, enter the URL in Play Console, and complete the Data Safety form
-consistently with the policy.
+**Resolved 2026-08-14, by a strategy change rather than by publishing it.** The contact address
+(`miksdevstudio@gmail.com`) is filled in and the policy is complete. Scrap Siege is now submitted only
+to Shipaton's Next Gen track, which requires **no store release** (see `plan.md` Section 16), so there
+is no Play Console privacy-policy field and no Data Safety form. **The policy is no longer a blocker
+on anything.**
+
+It is deliberately **kept and kept accurate** anyway. The app still takes real money through a real
+billing integration, the public repository is itself a judged artifact, and an inaccurate public
+statement about data handling is a liability whether or not a store demanded it. The maintenance rule
+below therefore still stands.
 
 > **New standing checklist item — a privacy policy is a security control here, not just paperwork.**
 > Section B's permission allowlist and section 5 of the policy are the same list stated twice, once

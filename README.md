@@ -39,20 +39,42 @@ The full loop is **playable end to end on device and accepted by device testing 
 
 - **Recorded audio** — every sound is synthesized procedurally at runtime. A drop-in override layer for real clips is in place and `docs/SOUND_SHOPPING_LIST.md` is the list; no files yet.
 - **Sentry system overhaul** — deliberately paused. Two of the items deferred with it were closed on 2026-08-14 because a device test surfaced their symptoms (see below); the rest still stand.
-- **A *published* privacy policy.** The policy itself is now written — [`docs/privacy/index.html`](docs/privacy/index.html), with a summary in [`docs/PRIVACY_POLICY.md`](docs/PRIVACY_POLICY.md) — and describes what the app actually does rather than a template's hedges. What remains is not writing but *publishing*: enabling GitHub Pages, replacing the one contact-email placeholder, and entering the URL in Play Console. Until that URL resolves, this is still a **hard blocker on publishing**.
 - Board elevation, more levels, demo video and submission assets.
 
-### Closed-testing checklist (Play requires 12 testers / 14 days before production)
+## Submission route: Shipaton 2026 **Next Gen** track, no store release
 
-- [x] Signed release AAB builds and uploads; real subscription purchased end to end and the `pro` entitlement confirmed active on device (2026-08-10/11).
+Decided 2026-08-14. Scrap Siege is submitted **only** to the Next Gen (student) award, which is the
+one track whose rules state that *"no paid Apple or Google developer account or store release is
+required"* — students submit **a demo video and a link to a public, open-source repository with a
+licence file** instead of shipping to a store. Every other Shipaton track requires the app's first
+public version to go live on the App Store, Google Play or the Galaxy Store inside the submission
+window, and Play's mandatory 12-tester / 14-day closed test sits in front of that.
+
+That trade is deliberate: the closed-test fortnight, the Data Safety form, the store listing assets
+and the production review are all bought back and spent on the game instead. **The RevenueCat SDK
+requirement is not waived by the track and does not need to be** — it was already met on real
+hardware with real money in August (see above), which is stronger evidence than any simulated
+purchase would have been.
+
+### Next Gen submission checklist
+
+- [x] **RevenueCat SDK powering a real in-app purchase** — subscription bought end to end on device, `pro` entitlement confirmed active, transactions visible in the RevenueCat dashboard (2026-08-10/11).
+- [x] **Public, open-source repository** with an [MIT licence file](LICENSE) — required explicitly by the Next Gen rules.
 - [x] Purchase paths reviewed for abuse and rate limited (`SECURITY.md`, 2026-08-14).
-- [x] Per-level results and star ratings, so a tester has a reason to replay a map.
-- [ ] **Device-test Pass H** — the sentry placement fix, the Turret lifetime, and the hidden unit stands have only been Editor-verified.
-- [x] **Privacy policy written** — `docs/privacy/index.html`, covering camera/ARCore, RevenueCat, local storage, permissions and deletion rights.
-- [ ] **Privacy policy *published*** (blocker, above) — enable GitHub Pages on `main` / `/docs`, replace `CONTACT_EMAIL_PLACEHOLDER`, paste the URL into Play Console, and answer the Data Safety form to match.
+- [x] Per-level results and star ratings.
+- [x] **Privacy policy** — [`docs/privacy/index.html`](docs/privacy/index.html), summarised in [`docs/PRIVACY_POLICY.md`](docs/PRIVACY_POLICY.md). No longer a publishing blocker without a store release, but kept and kept accurate: it is a truthful description of an app that really does take money, and the repo is judged.
+- [ ] **Device-test Pass H** — the sentry placement fix, the Turret lifetime and the hidden unit stands are Editor-verified only.
 - [ ] Recorded audio over the procedural layer.
-- [ ] Store listing assets: screenshots, feature graphic, short/full description.
-- [ ] Demo video — **deliberately last**, once the product is final.
+- [ ] **Demo video** — **deliberately last**, once the product is final. This is now the single most important deliverable, because with no store listing it is the only way a judge sees the game run.
+- [ ] Confirm Devpost account uses a qualifying **student/academic email** — a Next Gen eligibility condition, and not something the repo can satisfy.
+
+### A note on the paywall in a sideloaded build
+
+Because there is no public store release, the shipped artifact is an APK you install directly. Google
+Play Billing only serves product details to a package that Play itself installed and licensed, so on
+a sideloaded build the paywall correctly reports *"Store unavailable"* rather than showing a price —
+that is the expected consequence of the delivery method, not a broken integration. The purchase path
+is real and is demonstrated on a Play-installed build in the demo video.
 
 ### Known limitations
 
@@ -136,4 +158,12 @@ adb logcat -d -s Unity:V | grep -iE "LevelBuilder|selected|Rally"
 
 ## License / submission context
 
-Public repo maintained for the RevenueCat Shipaton 2026 Next Gen track submission. See `plan.md` for full submission requirements and timeline.
+Licensed under the [MIT License](LICENSE). Public repo maintained for the **RevenueCat Shipaton 2026
+Next Gen track** submission, which requires a public open-source repository *including a licence
+file* in place of a store release. See the submission checklist above, and `plan.md` Section 16 for
+the reasoning behind the no-store-release route.
+
+Note that the MIT licence covers this repository as a whole, including the Blender-authored models in
+`Assets/Models` and the renders in `docs/art`, all of which are original work for this project. No
+third-party audio ships in the repo — every sound is synthesized at runtime by `ProceduralSfx.cs`, so
+there are no sample licences to track.

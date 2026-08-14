@@ -1092,7 +1092,54 @@ allowlist. `plan.md` Section 15 has the verification table.
 > is trivially machine-checkable by Google. Same applies to section 2 if the RevenueCat identity model
 > ever changes.
 
-**Still the user's to do, none of it code:** create the support address and replace the single
-`CONTACT_EMAIL_PLACEHOLDER` token (2 occurrences, one line plus one HTML comment), enable GitHub Pages
-on `main` / `/docs`, paste `https://mikhil-sec.github.io/ScrapSiege/privacy/` into Play Console, and
-fill the Data Safety form to match. **The policy is not a blocker any more; publishing it is.**
+Contact address `miksdevstudio@gmail.com` was filled in on 2026-08-14. **Superseded the same day by
+the strategy change below: with no store release there is no Play Console field and no Data Safety
+form, so the policy blocks nothing.** It is kept and kept accurate because the app really does take
+money and the repo is judged. Hosting it on GitHub Pages is optional polish now.
+
+---
+
+## ⚠️ Current state (2026-08-14, final) — SUBMISSION ROUTE CHANGED: Next Gen only, no store release
+
+Full reasoning is `plan.md` **Section 16**. **Read this before proposing any Play Console, closed
+testing, store listing or release-build work — that entire workstream is cancelled for this project.**
+
+**The decision:** Scrap Siege is submitted **only** to the Shipaton 2026 **Next Gen** (student) award.
+Google Play production — 12 testers x 14 days of closed testing, Data Safety, listing assets, review —
+is abandoned. The user is spending that effort on a separate app aimed at the Influencer award.
+
+**Why it is safe (verified against the official rules before acting, because the failure mode is
+total):** every other track requires the app's first public version to go live on a real store inside
+the submission window, and a closed/internal test explicitly does **not** count. Next Gen is the sole
+exemption — **"no paid Apple or Google developer account or store release is required"**, replaced by
+*"a demo video and a link to your public, open-source code repository, including an open-source
+license file."* Two attached conditions are **not satisfiable from the repo**: active student
+enrolment, and a **qualifying student/academic email on the Devpost account**.
+
+**The RevenueCat SDK requirement is NOT waived** — and does not need to be. It was met on real
+hardware with real money in August.
+
+### Do not adopt the Test Store — it was investigated and rejected on evidence
+
+The obvious move is swapping the `goog_` key for the project's Test Store key so a sideloaded build
+demos a purchase. The dashboard already supports it (the `$rc_monthly` package carries **both** the
+Play product and the Test Store product). **But Test Store needs `purchases-android` 9.9.0+, and this
+project is on `com.revenuecat.purchases-unity` 7.4.1 → `purchases-hybrid-common 13.14.0` (the 8.x
+line), with zero Test Store references in the installed package.** It is the deferred major SDK
+upgrade, not a key swap — and it would replace a *proven real purchase* with a simulated one, risking
+the one requirement that must hold. **Keep 7.4.1 and the real `goog_` key.**
+
+### What changed in code — deliberately almost nothing
+
+- **`LICENSE`** (new, MIT) — required explicitly by the Next Gen rules and previously **absent**.
+  That was a submission defect independent of the store decision.
+- **`PaywallController.LoadOffering`** — both failure paths now say *"Store unavailable. Subscribing
+  needs a Google Play install + connection."* With no store release, a sideloaded APK is the normal
+  delivery, and Play Billing serves no product details to a package it did not install; the old flat
+  "Offer unavailable right now." read as a broken paywall. `Assembly-CSharp` compiles clean.
+
+### What this promotes
+
+**The demo video is now the only way a judge sees the game run**, so it is the primary deliverable
+rather than the last polish item — still recorded last, per the standing instruction, but no longer
+something to leave to the final days. Device-testing Pass H is still the top technical risk.
