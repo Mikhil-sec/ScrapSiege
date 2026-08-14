@@ -38,12 +38,30 @@ namespace ScrapSiege.Core
             /// tinted: it is the thing that stays legible when a 5cm figure is seen from across a
             /// table, and tinting it would make it vanish into the team colour it sits on.
             /// </summary>
-            Trim
+            Trim,
+
+            /// <summary>Warm burnished gold. Veteran rank markings and weapon furniture.</summary>
+            Gold,
+
+            /// <summary>Dark oiled steel, distinctly heavier than <see cref="Metal"/>.</summary>
+            Steel,
+
+            /// <summary>A bright cool accent - lamps, beacons, sights. Draws the eye to one point.</summary>
+            Glow,
         }
 
         private static readonly Color PlateColor = new Color(0.13f, 0.13f, 0.15f);
         private static readonly Color MetalColor = new Color(0.42f, 0.44f, 0.47f);
         private static readonly Color TrimColor = new Color(0.98f, 0.62f, 0.16f);
+
+        // The Veteran palette. These three exist because of a real constraint: the team colour owns
+        // U_Body and that is the single most important thing to read on a crowded board, so a paid
+        // skin cannot buy its distinctiveness with body colour. It buys it here instead - never
+        // tinted, so a Veteran carries warm gold, dark steel and one bright accent that no free unit
+        // has, while blue-versus-red stays exactly as legible as before.
+        private static readonly Color GoldColor = new Color(0.85f, 0.66f, 0.25f);
+        private static readonly Color SteelColor = new Color(0.22f, 0.23f, 0.26f);
+        private static readonly Color GlowColor = new Color(0.55f, 0.92f, 0.98f);
 
         /// <summary>
         /// Resolves a slot's role from its name. Terrain models use "SS_Body" / "SS_Accent" /
@@ -55,6 +73,13 @@ namespace ScrapSiege.Core
         public static Role RoleForSlot(Material source)
         {
             string name = source != null ? source.name : string.Empty;
+
+            // Checked before Plate/Metal because "Steel" would otherwise have to avoid colliding
+            // with them by luck rather than by order.
+            if (Has(name, "Gold")) return Role.Gold;
+            if (Has(name, "Steel")) return Role.Steel;
+            if (Has(name, "Glow")) return Role.Glow;
+
             if (Has(name, "Plate")) return Role.Plate;
             if (Has(name, "Metal")) return Role.Metal;
             if (Has(name, "Crest") || Has(name, "Trim")) return Role.Trim;
@@ -74,6 +99,9 @@ namespace ScrapSiege.Core
                 case Role.Plate: return PlateColor;
                 case Role.Metal: return MetalColor;
                 case Role.Trim: return TrimColor;
+                case Role.Gold: return GoldColor;
+                case Role.Steel: return SteelColor;
+                case Role.Glow: return GlowColor;
                 case Role.Accent: return new Color(body.r * 0.55f, body.g * 0.55f, body.b * 0.55f, 1f);
                 default: return body;
             }

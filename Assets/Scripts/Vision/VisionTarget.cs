@@ -65,6 +65,51 @@ namespace ScrapSiege.Vision
         }
 
         /// <summary>
+        /// Re-collects the renderers this target fades, and re-derives its sample points from them.
+        ///
+        /// <para><b>Why this has to exist.</b> <see cref="Awake"/> caches the renderer list at
+        /// Instantiate, which is BEFORE <see cref="ScrapSiege.Siege.UnitClassVisual"/> swaps in a
+        /// class model and disables the shared trooper body. <see cref="ApplyAlpha"/> then writes
+        /// <c>renderer.enabled = visible</c> across that stale list, so the first time the player
+        /// laid eyes on an enemy the hidden body - spear and all - was switched back ON, rendering
+        /// inside the class model. That is the "two models stacked inside each other, one static
+        /// while the other moves" reported from device on 2026-08-13: the resurrected body is the
+        /// one the animator was driving.</para>
+        ///
+        /// <para>Only currently-ENABLED renderers are kept, which is what makes this a fix rather
+        /// than a re-run: whatever deliberately hid a renderer before calling this keeps its
+        /// decision, permanently, because this component never sees it again.</para>
+        ///
+        /// <para>The owned material instances are released too. They were made from the old body's
+        /// materials, and <see cref="OnDestroy"/> destroying materials that something else is still
+        /// pointing at is exactly the bug that rendered enemy debris magenta in Pass F.</para>
+        ///
+        /// <para><b>General rule this belongs to:</b> any component that caches renderers or child
+        /// transforms at Awake is invalidated by the class-model swap and needs a rebind hook.
+        /// <c>UnitTeamTint.Apply</c> and <c>UnitAnimator.Rebind</c> already had one; this did not.</para>
+        /// </summary>
+        public void RefreshRenderers()
+        {
+            var kept = new List<Renderer>();
+            foreach (var renderer in GetComponentsInChildren<Renderer>(true))
+            {
+                if (renderer == null || !renderer.enabled) continue;
+                kept.Add(renderer);
+            }
+
+            renderers = kept.ToArray();
+
+            foreach (var material in ownedMaterials)
+                if (material != null) Destroy(material);
+            ownedMaterials.Clear();
+            materialsPrepared = false;
+
+            // The samples describe the silhouette the player is trying to see. Keeping the old
+            // body's extents would raycast at a shape that is no longer on the board.
+            ResolveSampleOffsets();
+        }
+
+        /// <summary>
         /// Places the three samples across the object's real vertical extent: near the bottom, at
         /// the centre, near the top. Falls back to the manual height when there is no renderer to
         /// measure (or when explicitly disabled).

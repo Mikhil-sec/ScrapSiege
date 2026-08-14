@@ -23,7 +23,7 @@ MonoBehaviour:
   invisibleToSentries: 0
   speedMultiplier: 0.9
   engagementRadiusFraction: 0.34
-  attackTickSeconds: 0.75
+  attackTickSeconds: 0.9
   attackDamage: 4
   winnerRecoverySeconds: 0.9
   evadesCombat: 0
@@ -31,6 +31,26 @@ MonoBehaviour:
   modelPrefab: {fileID: 919132149155446097, guid: 99bc2f4975bac1a4d974a11fa4c9c84f, type: 3}
   proModelPrefab: {fileID: 919132149155446097, guid: e5c334b6f1d62584aa8f59f35a4f627a, type: 3}
   modelScaleMultiplier: 0.95
+  motion:
+    overrideDefaults: 1
+    legSwingDegrees: 34
+    stridesPerMetre: 5.2
+    bobHeightFraction: 0.028
+    leanDegrees: 7
+    attackStyle: 1
+    attackTravelFraction: 0.09
+    attackDurationSeconds: 0.2
+    weaponSwingDegrees: 46
+  proMotion:
+    overrideDefaults: 1
+    legSwingDegrees: 30
+    stridesPerMetre: 4.8
+    bobHeightFraction: 0.02
+    leanDegrees: 5
+    attackStyle: 1
+    attackTravelFraction: 0.11
+    attackDurationSeconds: 0.22
+    weaponSwingDegrees: 58
   silhouette: 2
   accentColor: {r: 0.62, g: 0.9, b: 0.35, a: 1}
   requiresPro: 0

@@ -16,6 +16,7 @@ GameObject:
   - component: {fileID: 5618677253655437033}
   - component: {fileID: 7292235406975273977}
   - component: {fileID: 998129838908122787}
+  - component: {fileID: 8939762530155870208}
   m_Layer: 0
   m_Name: EnemySiegeUnit
   m_TagString: Untagged
@@ -103,15 +104,25 @@ MonoBehaviour:
   speedVarianceMin: 0.85
   speedVarianceMax: 1.15
   arrivalJitterRadius: 0.1
+  laneSpreadFraction: 0.16
+  laneWaypointRange: {x: 0.35, y: 0.65}
+  coverCostVariance: {x: 0.7, y: 1.5}
+  avoidancePriorityRange: {x: 30, y: 70}
   boardCrossingSeconds: 16
   arrivalDistanceFraction: 0.045
   arrivalJitterFraction: 0.035
   engagementRadiusFraction: 0.06
   attackTickSeconds: 0.5
   attackDamage: 5
+  maxAttackersPerTarget: 3
+  focusDamageFalloff: 0.6
+  immediateThreatBias: 0.35
+  retargetIntervalSeconds: 0.25
   coverDamageMultiplier: 0.5
   winnerRecoverySeconds: 0.8
   navMeshSampleFraction: 0.02
+  referenceBoardLength: 0.6
+  boardScaleClamp: {x: 0.55, y: 1.8}
   unitClass: {fileID: 0}
 --- !u!114 &5920131068273842786
 MonoBehaviour:
@@ -135,6 +146,8 @@ MonoBehaviour:
   leanDegrees: 8
   lungeDistanceFraction: 0.12
   lungeDurationSeconds: 0.25
+  weaponSwingDegrees: 55
+  attackStyle: 0
 --- !u!114 &5618677253655437033
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -176,6 +189,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bc8d1948a5955bb48a0778475d4141cd, type: 3}
   m_Name: 
   m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Siege.UnitClassVisual
+--- !u!114 &8939762530155870208
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1456218192370903693}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 91d1cf7e38fb8124c9ab32704c117842, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: ScrapSiege.Runtime::ScrapSiege.Siege.UnitMuzzle
+  fallbackHeightFraction: 0.62
 --- !u!1001 &6636092529809267817
 PrefabInstance:
   m_ObjectHideFlags: 0

@@ -55,10 +55,46 @@ namespace ScrapSiege.Siege
         /// </summary>
         public Team Team { get; private set; } = Team.Enemy;
 
+        [Tooltip("Fallback eye height in REAL metres, used only until MusterPhaseController supplies " +
+                 "the real vantage. Roughly head height on a sentry figure.")]
+        [SerializeField] private float fallbackEyeHeight = 0.03f;
+
         private float boardLength;
         private SentryFireVisualizer fireVisualizer;
 
+        private Vector3 vantage;
+        private bool hasVantage;
+
         public void SetTeam(Team team) => Team = team;
+
+        /// <summary>
+        /// Where this sentry is considered to be WATCHING from - the top of the chokepoint it
+        /// garrisons, supplied by <see cref="MusterPhaseController"/>.
+        ///
+        /// <para><b>Why the eye is not where the model is.</b> A sentry is spawned by sampling the
+        /// NavMesh at its anchor's centre, and the anchor carves a hole, so the sentry actually
+        /// stands on the ground BESIDE the tower or spire it garrisons. Once line of sight became a
+        /// real rule (2026-08-13) that geometry was fatal: a ground-level ray from a sentry standing
+        /// next to a wall is blocked by that wall, so every sentry would have been blinded by the
+        /// very thing it was posted to watch from - and Blind Spire, whose whole premise is two
+        /// sentries stationed behind a central spire, would have stopped functioning entirely.</para>
+        ///
+        /// <para>Raising the eye to the anchor's top is also just what the fiction already says: a
+        /// watchtower sentry watches from the tower. <see cref="SentryFireVisualizer"/> draws its
+        /// tracer from the same point, so the rule and the picture cannot disagree - the standing
+        /// habit in this file since the arc visualizer was caught drawing at 4% of its real range.
+        /// </para>
+        /// </summary>
+        public void SetVantage(Vector3 worldEyePoint)
+        {
+            vantage = worldEyePoint;
+            hasVantage = true;
+        }
+
+        /// <summary>Where this sentry sees and fires from. Public so the visualizer cannot re-derive it.</summary>
+        public Vector3 EyePoint => hasVantage
+            ? vantage
+            : transform.position + Vector3.up * WorldScale.Metres(fallbackEyeHeight);
 
         /// <summary>
         /// Rescales this sentry's reach to the board it is defending. Called by
@@ -152,6 +188,18 @@ namespace ScrapSiege.Siege
                 if (!IsInArc(unit.transform.position)) continue;
                 if (IsInCoverLane(unit.transform.position)) continue;
 
+                // Terrain now genuinely blocks a sentry, the same way it blocks a Marksman - added
+                // 2026-08-13, when "units get shot through walls" was reported. Deliberately checked
+                // LAST: it is the only expensive test here, and the two cheap rejections above
+                // already remove most candidates.
+                //
+                // This carves a real sight shadow behind tall pieces. SentryArcVisualizer still
+                // draws an un-carved wedge, so the drawn arc now slightly over-promises - left that
+                // way on purpose, because Mechanic 3's whole position is that the HUD never tells
+                // you WHERE the safe ground is; you find it by moving. Worth revisiting with the
+                // sentry overhaul.
+                if (!HasFiringLine(unit)) continue;
+
                 // Cover is deliberately still total immunity here rather than the fractional
                 // reduction unit-vs-unit combat uses. This is the sentry's long-standing tuned rule
                 // and the sentry system is awaiting its own overhaul - changing it now would move
@@ -189,6 +237,43 @@ namespace ScrapSiege.Siege
 
             float angle = Vector3.Angle(forward.normalized, toUnit.normalized);
             return angle <= facingArcDegrees * 0.5f;
+        }
+
+        /// <summary>
+        /// True if no terrain occluder stands between this sentry's vantage and the unit's own
+        /// measured mid-height.
+        ///
+        /// Uses the same single implementation of the sight rule everything else does
+        /// (<see cref="ScrapSiege.Vision.LineOfSightController.HasClearLine"/>) rather than a second
+        /// raycast written here - a rule with two implementations is a rule with two behaviours.
+        /// </summary>
+        private bool HasFiringLine(SiegeUnit unit)
+        {
+            return ScrapSiege.Vision.LineOfSightController.HasClearLine(
+                EyePoint,
+                MidHeightOf(unit),
+                SiegeLayers.TerrainOccluderMask,
+                0f);
+        }
+
+        /// <summary>
+        /// A unit's visual centre. Aiming at the transform origin would put the ray along the table
+        /// surface, where it grazes the board slab and every terrain base plate - so essentially
+        /// everything would read as blocked.
+        /// </summary>
+        private static Vector3 MidHeightOf(Component target)
+        {
+            bool any = false;
+            Bounds bounds = default;
+
+            foreach (var renderer in target.GetComponentsInChildren<Renderer>())
+            {
+                if (renderer == null || !renderer.enabled) continue;
+                if (!any) { bounds = renderer.bounds; any = true; }
+                else bounds.Encapsulate(renderer.bounds);
+            }
+
+            return any ? bounds.center : target.transform.position;
         }
 
         private bool IsInCoverLane(Vector3 position)

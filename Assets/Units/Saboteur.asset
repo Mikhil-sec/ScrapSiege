@@ -31,6 +31,26 @@ MonoBehaviour:
   modelPrefab: {fileID: 919132149155446097, guid: edd6c1c661102b443a38f2d68cbc68c5, type: 3}
   proModelPrefab: {fileID: 919132149155446097, guid: 9bf246901c498a6469fa8c487f097a7c, type: 3}
   modelScaleMultiplier: 0.85
+  motion:
+    overrideDefaults: 1
+    legSwingDegrees: 46
+    stridesPerMetre: 7.5
+    bobHeightFraction: 0.035
+    leanDegrees: 14
+    attackStyle: 0
+    attackTravelFraction: 0.14
+    attackDurationSeconds: 0.18
+    weaponSwingDegrees: 62
+  proMotion:
+    overrideDefaults: 1
+    legSwingDegrees: 52
+    stridesPerMetre: 9
+    bobHeightFraction: 0.028
+    leanDegrees: 18
+    attackStyle: 0
+    attackTravelFraction: 0.15
+    attackDurationSeconds: 0.15
+    weaponSwingDegrees: 68
   silhouette: 3
   accentColor: {r: 0.8, g: 0.4, b: 0.92, a: 1}
   requiresPro: 0

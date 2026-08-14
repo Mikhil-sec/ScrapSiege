@@ -16,6 +16,10 @@ namespace ScrapSiege.Siege
     ///
     /// Everything is driven off actual speed rather than a timer, so a unit slowed by a crowd or
     /// stopped at a chokepoint visibly stops marching instead of moon-walking on the spot.
+    ///
+    /// The serialized values below are the defaults every class used before per-class motion
+    /// existed. A <see cref="UnitMotionProfile"/> with overrideDefaults ticked replaces them at
+    /// spawn - see <see cref="ApplyMotionProfile"/>.
     /// </summary>
     [RequireComponent(typeof(NavMeshAgent))]
     public class UnitAnimator : MonoBehaviour
@@ -43,10 +47,15 @@ namespace ScrapSiege.Siege
         [SerializeField] private float leanDegrees = 8f;
 
         [Header("Attack")]
-        [Tooltip("Attack lunge as a fraction of the unit's own height.")]
+        [Tooltip("Attack body travel as a fraction of the unit's own height.")]
         [SerializeField] private float lungeDistanceFraction = 0.12f;
 
         [SerializeField] private float lungeDurationSeconds = 0.25f;
+
+        [Tooltip("Weapon-arm rotation at the peak of the attack, in degrees.")]
+        [SerializeField] private float weaponSwingDegrees = 55f;
+
+        [SerializeField] private AttackStyle attackStyle = AttackStyle.Thrust;
 
         private NavMeshAgent agent;
         private float strideCycle;
@@ -62,31 +71,75 @@ namespace ScrapSiege.Siege
         private Quaternion legRightRest;
         private Quaternion weaponArmRest;
 
+        // Where the name lookup is allowed to search. Null means the whole hierarchy, which is only
+        // correct before a class model has been swapped in - see Rebind.
+        private Transform searchRoot;
+
         private void Awake()
         {
             Bind();
         }
 
         /// <summary>
-        /// Re-finds the animated parts and re-caches their rest poses.
+        /// Re-finds the animated parts and re-caches their rest poses, searching ONLY inside
+        /// <paramref name="root"/>.
         ///
         /// <para>Called by <see cref="UnitClassVisual"/> after it swaps in a class's own model.
         /// <see cref="Awake"/> runs at Instantiate, which is before the class is applied, so without
-        /// this the animator would keep driving the transforms of the hidden shared trooper body -
-        /// the new model would be rigid while an invisible one marched inside it.</para>
+        /// this the animator keeps driving the transforms of the hidden shared trooper body.</para>
+        ///
+        /// <para><b>The scope argument is the whole fix, and its absence was a real shipped bug.</b>
+        /// The old parameterless version cleared the fields and re-ran the same lookup - but that
+        /// lookup walks <c>GetComponentsInChildren&lt;Transform&gt;()</c> and returns the FIRST name
+        /// match, and the original <c>Visual</c> body is child 0 while the swapped-in model is
+        /// appended last. So it re-found the exact same hidden <c>Torso</c>/<c>Leg_L</c>/<c>Leg_R</c>
+        /// it was supposed to stop driving. Every class model in the game was therefore rigid while
+        /// an invisible trooper marched inside it - which on enemy units, where
+        /// <see cref="ScrapSiege.Vision.VisionTarget"/> was separately switching that body back on,
+        /// showed up on device as two models stacked inside each other with only one of them moving.
+        /// Re-running a name lookup is not the same as re-scoping it.</para>
         ///
         /// <para>The serialized overrides are cleared first: they are populated by name lookup, so
         /// leaving them pointing at the old body would make Bind's null checks skip the re-find
         /// entirely. An Inspector-assigned reference on a class-model unit is not a supported
         /// combination and would be a genuine authoring mistake.</para>
         /// </summary>
-        public void Rebind()
+        public void Rebind(Transform root)
         {
+            searchRoot = root;
             body = null;
             legLeft = null;
             legRight = null;
             weaponArm = null;
             Bind();
+        }
+
+        /// <summary>
+        /// Adopts a class's authored gait and attack style. Called from
+        /// <see cref="SiegeUnit.ApplyClass"/> before <see cref="Rebind"/>, so the new values are
+        /// already in place when the rest poses and motion scale are resolved.
+        ///
+        /// A null or non-overriding profile is a no-op rather than a reset, so a class that has not
+        /// authored one keeps the shared defaults above.
+        /// </summary>
+        public void ApplyMotionProfile(UnitMotionProfile profile)
+        {
+            if (profile == null || !profile.overrideDefaults) return;
+
+            legSwingDegrees = profile.legSwingDegrees;
+            stridesPerMetre = profile.stridesPerMetre;
+            bobHeightFraction = profile.bobHeightFraction;
+            leanDegrees = profile.leanDegrees;
+
+            attackStyle = profile.attackStyle;
+            lungeDistanceFraction = profile.attackTravelFraction;
+            lungeDurationSeconds = Mathf.Max(0.05f, profile.attackDurationSeconds);
+            weaponSwingDegrees = profile.weaponSwingDegrees;
+
+            // The fractions above are resolved into local space against the measured model, so a
+            // profile applied after the first Bind has to re-resolve or it silently keeps the old
+            // amplitudes. Cheap, and it makes call order not matter.
+            ResolveMotionScale();
         }
 
         private void Bind()
@@ -153,10 +206,18 @@ namespace ScrapSiege.Siege
             return first ? 0f : bounds.size.y;
         }
 
+        /// <summary>
+        /// Finds an animated part by name, restricted to <see cref="searchRoot"/> once a class model
+        /// has claimed one. The whole-hierarchy fallback is for the legacy scan/Fortify path, where
+        /// no swap ever happens and the only body present is the right one.
+        /// </summary>
         private Transform FindChild(string childName)
         {
-            foreach (var t in GetComponentsInChildren<Transform>())
+            Transform root = searchRoot != null ? searchRoot : transform;
+
+            foreach (var t in root.GetComponentsInChildren<Transform>(true))
                 if (t.name == childName) return t;
+
             return null;
         }
 
@@ -170,7 +231,7 @@ namespace ScrapSiege.Siege
             AdvanceStride(speed);
             ApplyLegs(normalized);
             ApplyBody(normalized);
-            TickLunge();
+            TickAttack();
         }
 
         /// <summary>
@@ -208,28 +269,68 @@ namespace ScrapSiege.Siege
 
             // Bob at twice stride frequency - the body rises once per footfall, not once per cycle.
             float bob = Mathf.Abs(Mathf.Sin(strideCycle)) * bobLocal * normalized;
-            float lunge = lungeTimer > 0f
-                ? Mathf.Sin((1f - lungeTimer / lungeDurationSeconds) * Mathf.PI) * lungeLocal
-                : 0f;
+            float phase = AttackPhase();
 
-            body.localPosition = bodyRestPosition + new Vector3(0f, bob, lunge);
-            body.localRotation = bodyRestRotation * Quaternion.Euler(leanDegrees * normalized, 0f, 0f);
+            // Where the attack drives the body. Recoil is the one that goes BACKWARD: a unit that
+            // fires a tracer has nothing to reach for, so a forward lunge reads as it trying to stab
+            // something on the other side of the board.
+            float travel = phase * lungeLocal * (attackStyle == AttackStyle.Recoil ? -0.7f : 1f);
+
+            // A brace is a shove from behind the shield, so the body drops into it as it goes.
+            float dip = attackStyle == AttackStyle.Brace ? -phase * lungeLocal * 0.35f : 0f;
+
+            body.localPosition = bodyRestPosition + new Vector3(0f, bob + dip, travel);
+
+            // A swipe carries the whole torso round with the arc; everything else only leans.
+            float twist = attackStyle == AttackStyle.Swipe ? phase * weaponSwingDegrees * 0.35f : 0f;
+            body.localRotation = bodyRestRotation * Quaternion.Euler(leanDegrees * normalized, twist, 0f);
         }
 
-        private void TickLunge()
+        /// <summary>0 at rest, rising to 1 at the peak of the attack and back to 0. One shared curve
+        /// so every style stays in step with the same tick.</summary>
+        private float AttackPhase()
+        {
+            if (lungeTimer <= 0f) return 0f;
+            return Mathf.Sin((1f - lungeTimer / lungeDurationSeconds) * Mathf.PI);
+        }
+
+        private void TickAttack()
         {
             if (lungeTimer <= 0f) return;
             lungeTimer = Mathf.Max(0f, lungeTimer - Time.deltaTime);
 
-            if (weaponArm != null)
+            if (weaponArm == null) return;
+
+            float phase = AttackPhase();
+            float swing = phase * weaponSwingDegrees;
+
+            switch (attackStyle)
             {
-                float t = 1f - lungeTimer / lungeDurationSeconds;
-                float thrust = Mathf.Sin(t * Mathf.PI) * 55f;
-                weaponArm.localRotation = weaponArmRest * Quaternion.Euler(-thrust, 0f, 0f);
+                // The muzzle kicks UP and the arm rides back with it, then settles. Reads as a shot
+                // being fired rather than a weapon being swung at something out of reach.
+                case AttackStyle.Recoil:
+                    weaponArm.localRotation = weaponArmRest * Quaternion.Euler(swing * 0.45f, 0f, 0f);
+                    break;
+
+                // A shove: the shield arm barely rotates, because the power comes from the body.
+                case AttackStyle.Brace:
+                    weaponArm.localRotation = weaponArmRest * Quaternion.Euler(-swing * 0.35f, 0f, 0f);
+                    break;
+
+                // A lateral arc across the body - the only style that moves on Y, which is what
+                // makes it read as a different weapon and not just a bigger stab.
+                case AttackStyle.Swipe:
+                    weaponArm.localRotation = weaponArmRest * Quaternion.Euler(-swing * 0.3f, -swing, 0f);
+                    break;
+
+                case AttackStyle.Thrust:
+                default:
+                    weaponArm.localRotation = weaponArmRest * Quaternion.Euler(-swing, 0f, 0f);
+                    break;
             }
         }
 
-        /// <summary>Call when the unit strikes something - plays a one-shot lunge.</summary>
+        /// <summary>Call when the unit strikes something - plays a one-shot attack motion.</summary>
         public void PlayAttack()
         {
             lungeTimer = lungeDurationSeconds;

@@ -69,14 +69,42 @@ namespace ScrapSiege.Siege
 
         [SerializeField] private float arrivalJitterFraction = 0.035f;
 
-        [Header("Combat (plan.md Mechanic 6 - frontage-limited)")]
-        [Tooltip("How close an enemy must be to start a duel, as a fraction of board length.")]
+        [Header("Combat (plan.md Mechanic 6 - reach-only, capped focus)")]
+        [Tooltip("This unit's reach, as a fraction of board length. It is BOTH how far this unit " +
+                 "can shoot and how far it looks for something to shoot - the two are deliberately " +
+                 "the same number, which is what makes 'never chase' fall out for free.")]
         [SerializeField] private float engagementRadiusFraction = 0.06f;
 
         [Tooltip("Seconds between attack ticks. Paired with health to set the fight length.")]
         [SerializeField] private float attackTickSeconds = 0.5f;
 
         [SerializeField] private int attackDamage = 5;
+
+        [Tooltip("How many units may attack one target at once. This is the successor to the old " +
+                 "hard frontage cap of one, and it is the number that keeps combined arms from " +
+                 "collapsing back into Lanchester's square law. Raising it makes numbers matter " +
+                 "more and positioning matter less.")]
+        [Range(1, 8)]
+        [SerializeField] private int maxAttackersPerTarget = 3;
+
+        [Tooltip("Damage multiplier per extra attacker already on the same target. At 0.6 the first " +
+                 "attacker deals full damage, the second 60%, the third 36% - three units total " +
+                 "1.96x, not 3x. This is the single dial for how strong focus fire is, and the " +
+                 "direct answer to stacking cheap ranged units behind a screen.")]
+        [Range(0.2f, 1f)]
+        [SerializeField] private float focusDamageFalloff = 0.6f;
+
+        [Tooltip("A target already in range of hitting ME is scored this much 'closer' when picking " +
+                 "what to shoot, so a unit answers the enemy walking into it rather than the " +
+                 "marksman plinking at it from across the board. 1 disables the preference.")]
+        [Range(0.1f, 1f)]
+        [SerializeField] private float immediateThreatBias = 0.35f;
+
+        [Tooltip("Seconds between target searches. Acquisition costs a line-of-sight raycast per " +
+                 "candidate, so it is throttled rather than run every frame; validity of an " +
+                 "existing target is still checked every frame, which is the part that has to be " +
+                 "responsive.")]
+        [SerializeField] private float retargetIntervalSeconds = 0.25f;
 
         [Tooltip("Damage multiplier while standing in a CoverLane. Below 1 means three units in cover " +
                  "beat five in the open - which is what keeps positioning (and therefore Mechanic 4) " +
@@ -149,13 +177,19 @@ namespace ScrapSiege.Siege
         private float laneSpread;
         private float attackTimer;
         private float recoveryRemaining;
-        private SiegeUnit duelOpponent;
+        private float retargetTimer;
 
-        // The reach the CURRENT duel was opened at, copied to both sides when it begins. Without a
-        // shared value the two halves of one fight disagree about when it has ended: a marksman
-        // engaging at 0.16 of the board would still consider the duel live while its melee opponent,
-        // checking against its own 0.06, had already released and walked off.
-        private float duelExitRadius;
+        // Who this unit is shooting at. ONE-WAY: being shot does not make you a shooter, and does
+        // not stop you walking. See UpdateCombat for why that asymmetry is the whole design.
+        private SiegeUnit currentTarget;
+
+        // Everyone currently shooting at THIS unit, in the order they locked on. Order is what
+        // makes the focus falloff deterministic and fair: the first attacker keeps full damage
+        // however many pile in behind it, so adding bodies has diminishing value rather than
+        // re-rolling everyone's share.
+        private readonly List<SiegeUnit> attackers = new List<SiegeUnit>();
+
+        private UnitMuzzle muzzle;
 
         private bool classApplied;
         private bool boardScaleApplied;
@@ -184,11 +218,26 @@ namespace ScrapSiege.Siege
         /// <summary>True while diverting to a rally waypoint rather than heading for the base.</summary>
         public bool IsRallying => hasRouteWaypoint && routeWaypointIsRally;
 
+        /// <summary>True while this unit is shooting at something.</summary>
+        public bool IsEngaged => currentTarget != null;
+
+        /// <summary>How many units are currently shooting at this one. Read by tests and tuning.</summary>
+        public int IncomingAttackerCount => attackers.Count;
+
         /// <summary>
-        /// True while locked in a duel. This is the frontage cap: a unit already fighting cannot be
-        /// picked as anyone else's target, so damage never concentrates.
+        /// Whether another attacker may lock onto this unit.
+        ///
+        /// <para>This replaced the old hard frontage rule of "at most one". The reason the cap still
+        /// exists at all is unchanged and still load-bearing: with unlimited focus fire, losses
+        /// scale by Lanchester's square law, the bigger stack always wins, and "deploy the maximum
+        /// number of units" becomes strictly correct - which flattens positioning, vantage and cover
+        /// into irrelevance. What changed on 2026-08-13 is that a cap of exactly one also made
+        /// combined arms impossible, so a screen of Bulwarks with Marksmen firing past them - the
+        /// obvious and correct tactic for these five classes - did nothing. A cap of three with a
+        /// damage falloff keeps the anti-dogpile property while letting that formation mean
+        /// something.</para>
         /// </summary>
-        public bool IsEngaged => duelOpponent != null;
+        public bool CanAcceptAttacker => attackers.Count < maxAttackersPerTarget;
 
         /// <summary>False once the unit has started dying, so nothing targets or damages a corpse.</summary>
         public bool IsAlive => !dying;
@@ -205,6 +254,7 @@ namespace ScrapSiege.Siege
         {
             agent = GetComponent<NavMeshAgent>();
             animator = GetComponent<UnitAnimator>();
+            muzzle = GetComponent<UnitMuzzle>();
 
             CoverCostVariance = Random.Range(Mathf.Min(coverCostVariance.x, coverCostVariance.y),
                                              Mathf.Max(coverCostVariance.x, coverCostVariance.y));
@@ -245,9 +295,12 @@ namespace ScrapSiege.Siege
         {
             active.Remove(this);
 
-            // Never leave an opponent locked to a unit that no longer exists - it would be unable to
-            // ever engage anything again and would stand there permanently stopped.
-            ReleaseDuel();
+            // Two directions to clean up, and missing either one strands a unit permanently.
+            // Dropping our own target frees its attacker slot; releasing everyone shooting at us
+            // stops them standing over a corpse forever, since a stopped agent only ever resumes
+            // through the release path.
+            ClearTarget();
+            ReleaseAttackers();
         }
 
         /// <summary>
@@ -293,6 +346,13 @@ namespace ScrapSiege.Siege
                 if (agent != null) agent.radius *= definition.modelScaleMultiplier;
             }
 
+            // Applied BEFORE the visual swap, so the amplitudes are already in place when
+            // UnitAnimator.Rebind measures the new model and resolves them into its local space.
+            // The Veteran profile is chosen the same way the Veteran model is - see
+            // UnitClassVisual.ResolveModelPrefab - so a paid skin moves differently as well as
+            // looking different, which is most of what makes it feel worth paying for.
+            if (animator != null) animator.ApplyMotionProfile(ResolveMotionProfile(definition));
+
             var visual = GetComponent<UnitClassVisual>();
             if (visual != null) visual.Apply(definition);
 
@@ -304,6 +364,23 @@ namespace ScrapSiege.Siege
                 agent.isStopped = true;
                 agent.velocity = Vector3.zero;
             }
+        }
+
+        /// <summary>
+        /// The gait this unit should move with: the class's own, or its Veteran profile while Pro is
+        /// active. Falls back to the base profile whenever the entitlement is off or no Veteran
+        /// profile was authored, so a half-authored class degrades to "moves like the free version"
+        /// rather than to something broken. Mirrors how
+        /// <see cref="UnitClassVisual"/> picks between the base and Veteran model.
+        /// </summary>
+        private static UnitMotionProfile ResolveMotionProfile(UnitClass definition)
+        {
+            if (definition.proMotion != null
+                && definition.proMotion.overrideDefaults
+                && ScrapSiege.Monetization.ProEntitlement.IsUnlocked)
+                return definition.proMotion;
+
+            return definition.motion;
         }
 
         /// <summary>
@@ -503,7 +580,7 @@ namespace ScrapSiege.Siege
 
         /// <summary>
         /// Puts the agent back on whatever it was doing before a fight interrupted it. Needed
-        /// because <see cref="UpdateEngagedMovement"/> repoints the destination at the opponent.
+        /// because <see cref="StopForCombat"/> halts the agent while it is shooting.
         /// </summary>
         private void ResumeRoute()
         {
@@ -534,7 +611,7 @@ namespace ScrapSiege.Siege
         /// sentry system awaits its overhaul), and true for unit-vs-unit damage, where cover is a
         /// reduction rather than immunity.
         /// </summary>
-        public void TakeDamage(int amount, bool applyCover = false)
+        public void TakeDamage(float amount, bool applyCover = false)
         {
             if (dying) return;
 
@@ -550,23 +627,37 @@ namespace ScrapSiege.Siege
             if (dying) return;
             dying = true;
 
-            // Free the opponent before the effect plays, so the survivor starts recovering (and can
-            // resume walking) on the same frame rather than standing over a corpse.
+            // Free everything before the effect plays, so survivors start recovering (and resume
+            // walking) on the same frame rather than standing over a corpse.
             //
-            // The survivor needs its OWN ReleaseDuel call, not just the back-reference clear: agents
-            // are halted via agent.isStopped when a duel begins, and clearing the reference alone
-            // leaves the winner permanently frozen - it would never re-enter the engaged branch that
-            // resumes it, so it would stand still for the rest of the match.
-            SiegeUnit opponent = duelOpponent;
-            ReleaseDuel();
-            if (opponent != null)
-            {
-                opponent.ReleaseDuel();
-                opponent.BeginRecovery();
-            }
+            // Each attacker needs its OWN release, not just a reference clear: an attacker in range
+            // is halted via agent.isStopped, and only the release path sets isStopped back to false.
+            // Clearing the reference alone leaves it permanently frozen for the rest of the match -
+            // the exact bug the old symmetric duel code carried a comment about.
+            ClearTarget();
+            ReleaseAttackers(grantRecovery: true);
 
             UnitDeathEffect.Play(gameObject, transform.position.y);
             Destroy(gameObject);
+        }
+
+        /// <summary>
+        /// Detaches everyone shooting at this unit. <paramref name="grantRecovery"/> is true only on
+        /// death, so a kill - and nothing else - triggers the brief pause before the winner may pick
+        /// a new target.
+        /// </summary>
+        private void ReleaseAttackers(bool grantRecovery = false)
+        {
+            // Copied because ClearTarget mutates this list through the back-reference.
+            var snapshot = attackers.ToArray();
+            foreach (var attacker in snapshot)
+            {
+                if (attacker == null) continue;
+                attacker.ClearTarget();
+                if (grantRecovery) attacker.BeginRecovery();
+            }
+
+            attackers.Clear();
         }
 
         private void BeginRecovery() => recoveryRemaining = winnerRecoverySeconds;
@@ -588,13 +679,12 @@ namespace ScrapSiege.Siege
 
             UpdateCombat();
 
-            // A unit locked in a duel is either standing and fighting or closing on its opponent -
-            // either way UpdateEngagedMovement owns its navigation, so skip the base-advance and
-            // arrival logic rather than letting a stopped agent's zeroed remainingDistance be
-            // misread as having arrived.
+            // A unit that is shooting has stopped to do it, so UpdateCombat owns its navigation -
+            // skip the base-advance and arrival logic rather than letting a stopped agent's zeroed
+            // remainingDistance be misread as having arrived.
             //
-            // The exception is an evading class (the Saboteur): being shot at does not stop it, so
-            // it keeps running its original route while the duel is nominally live.
+            // Note what is NOT here any more: being shot AT no longer stops anything. That is the
+            // whole point of the 2026-08-13 rework - see UpdateCombat.
             if (IsEngaged && !Evades) return;
 
             FaceMovementDirection();
@@ -607,103 +697,110 @@ namespace ScrapSiege.Siege
         private float AttackRange => engagementRadius;
 
         /// <summary>
-        /// The frontage rule (plan.md Mechanic 6).
+        /// Combat (plan.md Mechanic 6, reworked 2026-08-13 from the original frontage rule).
         ///
-        /// A unit fights at most one enemy, and looks only for enemies that are not already fighting
-        /// someone. If every enemy in reach is busy, it finds nothing and simply walks on - which is
-        /// the whole point: a numerical advantage turns into units flowing PAST the fight toward the
-        /// objective, not into several units beating on one. Dogpiling would make losses scale by
-        /// Lanchester's square law, so the larger force would always win and "deploy the maximum
-        /// number of units" would be strictly correct, which flattens positioning, vantage and cover
-        /// into irrelevance.
+        /// <para><b>Reach-only targeting.</b> A unit only ever targets what is <i>already inside its
+        /// own reach</i>, and never chases. Acquisition radius and attack range are deliberately the
+        /// same number, so "close on the opponent" simply does not exist as a state.</para>
+        ///
+        /// <para><b>Why that mattered enough to rewrite this.</b> The previous version locked two
+        /// units into a symmetric duel, and the victim then walked to its attacker. A Marksman with
+        /// 0.34-of-the-board reach could therefore tractor-beam an enemy Trooper across a third of
+        /// the map: the Trooper abandoned its route to close on something it had no realistic chance
+        /// of reaching, which made screening formations pointless and made the longest-ranged class
+        /// the best puller in the game. Reported from device as "a marksman shooting at a troop far
+        /// away does not mean the troop should be locked onto the marksman". Now a Trooper under
+        /// long-range fire keeps advancing and only stops when something enters its own 0.06 - so
+        /// Bulwarks in front and Marksmen behind is a real formation, which is the whole point.</para>
+        ///
+        /// <para><b>One-way, not a duel.</b> Being shot at neither engages you nor stops you. Each
+        /// unit independently picks its own target, which is what allows several units to work on
+        /// one enemy while it fights only the one it chose.</para>
+        ///
+        /// <para><b>Capped, because uncapped focus fire is a known-bad design.</b> See
+        /// <see cref="CanAcceptAttacker"/> for why the cap survives even though its value changed
+        /// from 1 to 3, and <see cref="FocusDamageMultiplier"/> for the damper that makes stacking
+        /// attackers worth progressively less.</para>
         /// </summary>
         private void UpdateCombat()
         {
+            // An evading class never starts a fight - it has somewhere to be. It can still be shot
+            // at, which is how it takes damage on the way past.
+            if (Evades) return;
+
             if (IsEngaged)
             {
-                if (!IsDuelStillValid())
+                if (IsTargetStillValid())
                 {
-                    ReleaseDuel();
+                    HoldAndFight();
                     return;
                 }
 
-                UpdateEngagedMovement();
-                return;
+                ClearTarget();
             }
 
-            // An evading class never starts a fight - it has somewhere to be. It can still be
-            // engaged BY something, which is how it takes damage on the way past.
-            if (Evades) return;
-
-            // Recovery blocks STARTING a fight, never defending one. A unit that has just won is
-            // briefly vulnerable rather than briefly invincible.
+            // Recovery blocks acquiring a NEW target, never defending. A unit that has just killed
+            // something is briefly vulnerable rather than briefly invincible.
             if (recoveryRemaining > 0f) return;
 
-            SiegeUnit target = FindUnengagedEnemy();
-            if (target != null) BeginDuel(target);
+            retargetTimer -= Time.deltaTime;
+            if (retargetTimer > 0f) return;
+            retargetTimer = retargetIntervalSeconds;
+
+            SiegeUnit target = FindTarget();
+            if (target != null) AcquireTarget(target);
         }
 
         /// <summary>
-        /// The asymmetric half of combat, and the thing that makes a Marksman a Marksman.
-        ///
-        /// <para>A duel locks two units together, but they do not necessarily fight from the same
-        /// distance. Each side independently checks the range IT can shoot from: a marksman that
-        /// opened at 0.16 of the board is already in range and stands still firing, while the
-        /// assault unit it hit is far outside its own 0.06 melee reach, so it closes the gap
-        /// instead. That exchange - free damage while the enemy walks in, then a melee fight the
-        /// marksman loses - is the whole trade the class is built on, and it falls out of one
-        /// range comparison rather than a separate ranged-combat system.</para>
+        /// Stand still and shoot. There is no movement branch left: the target was inside reach when
+        /// it was acquired and is re-validated every frame, so anything out of reach is released
+        /// rather than pursued.
         /// </summary>
-        private void UpdateEngagedMovement()
+        private void HoldAndFight()
         {
-            // Being shot does not stop an evader. It keeps its original destination and simply
-            // absorbs the hits, so the counter-play is killing it, never pinning it.
-            if (Evades) return;
-
-            float sqrDistance = (duelOpponent.transform.position - transform.position).sqrMagnitude;
-            bool inRange = sqrDistance <= AttackRange * AttackRange;
-
-            if (inRange)
-            {
-                StopForCombat();
-                FightTick();
-                return;
-            }
-
-            // Out of our own reach: close on the opponent. Emplacements cannot, so they simply wait
-            // for it to come to them (and will hold the duel open until the exit radius breaks it).
-            if (IsStationary)
-            {
-                FaceOpponent();
-                return;
-            }
-
-            if (agent != null && agent.isOnNavMesh)
-            {
-                agent.isStopped = false;
-                agent.SetDestination(duelOpponent.transform.position);
-            }
-
-            FaceMovementDirection();
+            StopForCombat();
+            FightTick();
         }
 
-        private bool IsDuelStillValid()
+        /// <summary>
+        /// A target stays valid while it is alive and within a slightly generous version of this
+        /// unit's own reach. The margin stops the fight flickering on and off as agent avoidance
+        /// nudges two units a millimetre apart mid-exchange.
+        ///
+        /// Line of sight is re-checked here, not only at acquisition, so a unit that walks behind a
+        /// wall genuinely stops being shot instead of only being safe from NEW attackers.
+        /// </summary>
+        private bool IsTargetStillValid()
         {
-            if (duelOpponent == null || !duelOpponent.IsAlive) return false;
+            if (currentTarget == null || !currentTarget.IsAlive) return false;
 
-            // Generous exit range so two units that drift slightly apart mid-fight (agent avoidance
-            // nudges them) don't flicker in and out of the duel. duelExitRadius is the range the
-            // duel was OPENED at, shared by both sides - see the field comment for why deriving it
-            // per-side breaks long-range engagements.
-            float exitRadius = duelExitRadius * 1.6f;
-            return (duelOpponent.transform.position - transform.position).sqrMagnitude
-                   <= exitRadius * exitRadius;
+            float holdRadius = AttackRange * 1.25f;
+            if ((currentTarget.transform.position - transform.position).sqrMagnitude
+                > holdRadius * holdRadius)
+                return false;
+
+            return HasFiringLine(currentTarget);
         }
 
-        private SiegeUnit FindUnengagedEnemy()
+        /// <summary>
+        /// Picks what to shoot, from everything inside this unit's own reach.
+        ///
+        /// <para>Scored rather than simply nearest, because "nearest" answers the wrong question
+        /// when a Marksman is plinking from behind a Trooper that is about to hit you. A candidate
+        /// that can already hit ME is treated as <see cref="immediateThreatBias"/> times closer than
+        /// it is, so the unit walking into contact wins over the one merely in range. That is the
+        /// "a hostile troop coming into range should be targeted instead" behaviour, expressed as
+        /// one multiplier rather than a priority system with modes.</para>
+        ///
+        /// <para>The line-of-sight test is what stops a Marksman shooting through a wall - reported
+        /// from device 2026-08-13 and previously true of every damage source in the game. It runs
+        /// last because it is the only expensive check here.</para>
+        /// </summary>
+        private SiegeUnit FindTarget()
         {
-            SiegeUnit nearest = null;
-            float nearestSqr = engagementRadius * engagementRadius;
+            SiegeUnit best = null;
+            float bestScore = float.MaxValue;
+            float reachSqr = engagementRadius * engagementRadius;
 
             foreach (var other in active)
             {
@@ -711,43 +808,62 @@ namespace ScrapSiege.Siege
                 if (!other.IsAlive) continue;
                 if (other.Team == Team) continue;
 
-                // The frontage cap itself: an enemy already in a duel is not a candidate.
-                if (other.IsEngaged) continue;
+                // The cap: an enemy that already has its full complement of attackers is not a
+                // candidate, so a sixth unit walks on toward the objective instead of queueing.
+                if (!other.CanAcceptAttacker) continue;
 
                 float sqr = (other.transform.position - transform.position).sqrMagnitude;
-                if (sqr > nearestSqr) continue;
+                if (sqr > reachSqr) continue;
 
-                nearestSqr = sqr;
-                nearest = other;
+                float score = sqr;
+                if (sqr <= other.AttackRange * other.AttackRange)
+                    score *= immediateThreatBias;
+
+                if (score >= bestScore) continue;
+                if (!HasFiringLine(other)) continue;
+
+                bestScore = score;
+                best = other;
             }
 
-            return nearest;
+            return best;
         }
 
-        /// <summary>Locks both units into the duel. Symmetric, so neither can be pulled into a second one.</summary>
-        private void BeginDuel(SiegeUnit other)
+        /// <summary>
+        /// True if no terrain occluder sits between this unit and <paramref name="other"/>.
+        ///
+        /// <para>Reuses <see cref="ScrapSiege.Vision.LineOfSightController.HasClearLine"/> rather
+        /// than writing a second raycast rule - it is public and static precisely so the sight rule
+        /// has exactly one implementation. Terrain occluders already carry BoxColliders on the
+        /// SiegeTerrain layer, so nothing on the terrain side was needed.</para>
+        ///
+        /// <para>Measured mid-heights, never the transform origins: origins sit on the table, so an
+        /// origin-to-origin ray grazes the board slab and terrain bases and would report almost
+        /// everything as blocked.</para>
+        /// </summary>
+        private bool HasFiringLine(SiegeUnit other)
         {
-            duelOpponent = other;
-            other.duelOpponent = this;
+            return ScrapSiege.Vision.LineOfSightController.HasClearLine(
+                MidHeightOf(this),
+                MidHeightOf(other),
+                SiegeLayers.TerrainOccluderMask,
+                0f);
+        }
 
-            // Both sides judge the duel's end against the range it was opened at - the initiator's.
-            duelExitRadius = engagementRadius;
-            other.duelExitRadius = engagementRadius;
+        /// <summary>
+        /// Locks on. One-way: the target learns it is being shot at (so it can enforce the cap and
+        /// apply the falloff) but is not itself engaged and is not stopped.
+        /// </summary>
+        private void AcquireTarget(SiegeUnit target)
+        {
+            currentTarget = target;
+            target.attackers.Add(this);
 
-            // Only stop what is actually in range. The old unconditional double-stop froze a melee
-            // unit in place the instant a marksman across the board locked onto it, so it stood
-            // still being shot and never closed - the exact opposite of the intended trade.
             StopForCombat();
-            if (!other.Evades && !other.IsStationary)
-            {
-                float sqr = (other.transform.position - transform.position).sqrMagnitude;
-                if (sqr <= other.AttackRange * other.AttackRange) other.StopForCombat();
-            }
 
-            // Staggered so two units that meet head-on do not land every blow on the same frame and
+            // Staggered so units that arrive together do not land every blow on the same frame and
             // annihilate each other simultaneously - a fight should usually leave a survivor.
             attackTimer = Random.Range(0f, attackTickSeconds * 0.5f);
-            other.attackTimer = Random.Range(0f, other.attackTickSeconds * 0.5f);
         }
 
         private void StopForCombat()
@@ -755,26 +871,46 @@ namespace ScrapSiege.Siege
             if (agent != null && agent.isOnNavMesh) agent.isStopped = true;
         }
 
-        private void ReleaseDuel()
+        /// <summary>Drops this unit's target, frees the slot it held, and resumes the advance.</summary>
+        private void ClearTarget()
         {
-            if (duelOpponent != null)
+            if (currentTarget != null)
             {
-                // Clear the far side's back-reference only if it still points at us, so releasing a
-                // stale duel cannot detach an opponent from a fight it has since joined.
-                if (duelOpponent.duelOpponent == this) duelOpponent.duelOpponent = null;
-                duelOpponent = null;
+                currentTarget.attackers.Remove(this);
+                currentTarget = null;
             }
 
-            // An emplacement must stay stopped for its whole life - releasing a duel is not
+            // An emplacement must stay stopped for its whole life - losing a target is not
             // permission for a turret to start walking.
             if (agent != null && agent.isOnNavMesh && !IsStationary) agent.isStopped = false;
 
             ResumeRoute();
         }
 
+        /// <summary>
+        /// How much damage an attacker actually lands, given how many others are already on the same
+        /// target. The first attacker deals full damage, the second 60%, the third 36% - three total
+        /// 1.96x rather than 3x.
+        ///
+        /// <para><b>This is the anti-cheese damper</b>, and it exists for a concrete case the user
+        /// raised: two Bulwarks screening five ranged units, all pouring fire into one target for
+        /// five times the damage of a single unit. With the falloff that stack is worth barely more
+        /// than two units, so the correct play is spreading fire across the enemy line - which is
+        /// also the more interesting one. Ordering by lock-on time (rather than, say, by distance)
+        /// means reinforcing a fight has diminishing value instead of re-rolling everyone's share
+        /// every time a unit joins.</para>
+        /// </summary>
+        private float FocusDamageMultiplier(SiegeUnit target)
+        {
+            int rank = target.attackers.IndexOf(this);
+            if (rank <= 0) return 1f;
+
+            return Mathf.Pow(focusDamageFalloff, rank);
+        }
+
         private void FightTick()
         {
-            FaceOpponent();
+            FaceTarget();
 
             // A unit still recovering from its last kill does not swing yet, which hands the
             // initiative to whoever caught it.
@@ -790,27 +926,30 @@ namespace ScrapSiege.Siege
             // A ranged class draws its shot, because at this distance there is nothing else on
             // screen connecting shooter and victim - exactly the problem SentryFireVisualizer was
             // built to solve for sentries.
-            if (unitClass != null && unitClass.IsRanged) DrawShotAtOpponent();
+            if (unitClass != null && unitClass.IsRanged) DrawShotAtTarget();
 
             // Every blow lands somewhere visible, ranged or not. Melee previously produced nothing
             // but a lunge, so a fight between two units read as loitering rather than as combat -
             // the single biggest thing making the board look inert on a phone.
-            DrawImpactOnOpponent();
+            DrawImpactOnTarget();
 
-            duelOpponent.TakeDamage(attackDamage, applyCover: true);
+            currentTarget.TakeDamage(attackDamage * FocusDamageMultiplier(currentTarget),
+                                     applyCover: true);
         }
 
-        private void DrawShotAtOpponent()
+        private void DrawShotAtTarget()
         {
-            if (duelOpponent == null) return;
+            if (currentTarget == null) return;
 
-            // Fire from and to roughly chest height rather than the transform origins, which sit on
-            // the table - a tracer between two origins draws along the floor and reads as a decal.
-            float lift = engagementRadius * 0.12f;
-            Vector3 muzzle = transform.position + Vector3.up * lift;
-            Vector3 impact = duelOpponent.transform.position + Vector3.up * lift;
+            // The muzzle comes from the MODEL, measured, never from a number derived from reach.
+            // The old code fired from engagementRadius * 0.12 above the origin, which for the Turret
+            // put the tracer's origin visibly below its own barrel - reported from device
+            // 2026-08-13. See UnitMuzzle.
+            Vector3 origin = muzzle != null
+                ? muzzle.FirePoint()
+                : MidHeightOf(this);
 
-            CombatFx.Shot(muzzle, impact, unitClass.accentColor, boardLengthForFx);
+            CombatFx.Shot(origin, MidHeightOf(currentTarget), unitClass.accentColor, boardLengthForFx);
 
             ScrapSiege.Audio.GameAudio.Play(
                 unitClass.role == UnitRole.Emplacement
@@ -820,17 +959,17 @@ namespace ScrapSiege.Siege
         }
 
         /// <summary>
-        /// The spark where a blow lands. Aimed at the opponent's own measured mid-height rather than
+        /// The spark where a blow lands. Aimed at the target's own measured mid-height rather than
         /// its transform origin, which sits on the table - a burst at the origin looks like the floor
         /// cracking, not like a unit being hit. Same reasoning as
         /// <see cref="SentryFireVisualizer.AimPoint"/>.
         /// </summary>
-        private void DrawImpactOnOpponent()
+        private void DrawImpactOnTarget()
         {
-            if (duelOpponent == null) return;
+            if (currentTarget == null) return;
 
             Color color = unitClass != null ? unitClass.accentColor : new Color(1f, 0.72f, 0.32f);
-            CombatFx.Impact(MidHeightOf(duelOpponent), color, boardLengthForFx);
+            CombatFx.Impact(MidHeightOf(currentTarget), color, boardLengthForFx);
         }
 
         private static Vector3 MidHeightOf(Component target)
@@ -848,15 +987,15 @@ namespace ScrapSiege.Siege
             return any ? bounds.center : target.transform.position;
         }
 
-        private void FaceOpponent()
+        private void FaceTarget()
         {
-            if (duelOpponent == null) return;
+            if (currentTarget == null) return;
 
-            Vector3 toOpponent = duelOpponent.transform.position - transform.position;
-            toOpponent.y = 0f;
-            if (toOpponent.sqrMagnitude < 1e-6f) return;
+            Vector3 toTarget = currentTarget.transform.position - transform.position;
+            toTarget.y = 0f;
+            if (toTarget.sqrMagnitude < 1e-6f) return;
 
-            Quaternion look = Quaternion.LookRotation(toOpponent.normalized, Vector3.up);
+            Quaternion look = Quaternion.LookRotation(toTarget.normalized, Vector3.up);
             transform.rotation = Quaternion.Slerp(transform.rotation, look, Time.deltaTime * rotationSpeed);
         }
 

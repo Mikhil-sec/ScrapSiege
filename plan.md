@@ -800,3 +800,175 @@ The Marksman's reach (0.34) and everything else flagged in Pass E as likely over
 the user's report raised no balance complaint, and changing balance in the same pass as five
 structural fixes would make the next device test unattributable. `requireLineOfSight` is likewise
 still on, with its dial-down order intact in Section 10.
+
+## 13. Pass G â€” the Pass D+E+F device report (2026-08-13, later)
+
+Five items from the user's on-device test of the combined D/E/F build. **Two of the five turned out to
+be the same two root causes**, both confirmed by measurement in the live Editor rather than inferred.
+Everything below compiles clean, every reference set this pass was read back non-null, and all five
+items were verified by an automated Play-mode probe â€” **and none of it has run on a phone.**
+
+### 1. The two model-stacking bugs â€” "2 models inside each other, one static while the other moves"
+
+Reports 2 and 4 were one pair of causes, and both are the same *class* of mistake:
+**a component cached renderers or child transforms at `Awake`, before the class model existed.**
+
+- **`VisionTarget` was switching the hidden base body back on.** `Awake` caches
+  `GetComponentsInChildren<Renderer>()`; `UnitClassVisual` then disables that body when it swaps in a
+  class model; and `ApplyAlpha` writes `renderer.enabled = visible` straight across the stale list. So
+  the first time the player *saw* an enemy, the shared trooper â€” spear included â€” was re-enabled
+  inside the class model. `EnemySiegeUnit.prefab` carries `VisionTarget` and `SiegeUnit.prefab` does
+  not, which is exactly why the user saw it on the **enemy** marksman and nowhere else. Fixed with
+  `VisionTarget.RefreshRenderers()`, called from the swap: it keeps only renderers that are enabled at
+  that moment, releases the material instances it made from the old body, and re-derives the sample
+  points from the new silhouette.
+- **`UnitAnimator.Rebind()` was re-finding the same hidden body.** Its lookup walks
+  `GetComponentsInChildren<Transform>()` and takes the **first** name match â€” and `Visual` is child 0
+  while `ClassModel` is appended last. Clearing the fields and re-running an unscoped lookup is not
+  the same as re-scoping it, so it returned the identical `Torso`/`Leg_L`/`Leg_R`/`WeaponArm` every
+  time. **No class model in the game had ever animated, on either team.** `Rebind(Transform root)` now
+  takes the subtree to search; null keeps the whole-hierarchy behaviour for the legacy Fortify path.
+
+> **Standing rule earned here:** *any component that caches renderers or child transforms at `Awake`
+> is invalidated by the class-model swap and needs an explicit rebind hook.* `UnitTeamTint` and
+> `UnitAnimator` already had one; `VisionTarget` did not, and `UnitMuzzle` (new) has one from birth.
+> The hooks are deliberately all in one place at the end of `UnitClassVisual.SwapInClassModel`.
+
+### 2. Line of sight on unit combat and on sentries
+
+No damage source in the game had ever tested line of sight â€” the Marksman shooting through a wall was
+simply the first place it became visible, at 0.34 of the board. Both `SiegeUnit` and `GarrisonSentry`
+now call `LineOfSightController.HasClearLine` (already `public static` so the sight rule has exactly
+one implementation) against `SiegeLayers.TerrainOccluderMask`. Measured mid-heights, never transform
+origins â€” an origin-to-origin ray grazes the board slab and would report nearly everything blocked.
+`SiegeUnit` re-checks on **every attack tick**, not only at acquisition, so walking behind a wall
+genuinely stops the incoming fire.
+
+**The sentry needed one extra move to not break Blind Spire.** Sentries spawn by sampling the NavMesh
+at their anchor's centre, and the anchor carves a hole â€” so a sentry stands on the ground *beside* the
+tower it garrisons, and a ground-level ray would be blocked by its own tower. `MusterPhaseController`
+now passes the anchor's **measured top** as `GarrisonSentry.SetVantage`, and `SentryFireVisualizer`
+fires its tracer from the same point so the rule and the picture cannot disagree.
+
+WARNING â€” **deliberate consequence:** there is now a real sight shadow behind tall terrain, which
+strengthens Mechanic 3 but means `SentryArcVisualizer` draws an arc that slightly over-promises. Left
+that way on purpose â€” Mechanic 3's whole position is that the HUD never tells you *where* the safe
+ground is. Worth revisiting with the sentry overhaul. The cover-lane immunity rule is untouched.
+
+### 3. Combat reworked: reach-only targeting with capped focus fire
+
+The user asked for combat to stop being strictly 1-v-1, and for a marksman's fire to stop dragging its
+victim across the board. Both come from deleting the symmetric duel rather than adding a system.
+
+**Reach-only.** A unit only ever targets what is **already inside its own reach**, and never chases.
+Acquisition radius and attack range are the same number, so "close on the opponent" no longer exists
+as a state. A Trooper under long-range fire keeps advancing and stops only when something enters its
+own 0.06 â€” which is what finally makes *Bulwarks in front, Marksmen behind* a real formation.
+
+**One-way, not a duel.** Being shot at neither engages you nor stops you. Each unit picks its own
+target independently, which is what lets several work on one enemy while it fights only the one it
+chose.
+
+**Capped, because uncapped focus fire is a known-bad design.** The cap survives from the original
+frontage rule â€” with unlimited focus fire, losses scale by Lanchester's square law and "deploy the
+maximum number of units" becomes strictly correct â€” but its value moved from 1 to **3**, because a cap
+of exactly one also made combined arms impossible.
+
+| Dial | Value | What it does |
+|---|---|---|
+| `maxAttackersPerTarget` | 3 | a 4th attacker is refused and walks on toward the objective |
+| `focusDamageFalloff` | 0.6 | attacker 1 deals 100%, 2 deals 60%, 3 deals 36% â€” **1.96x total, not 3x** |
+| `immediateThreatBias` | 0.35 | an enemy already in range of hitting *me* scores as 3x closer |
+
+The falloff is the direct answer to the "two Bulwarks screening five ranged units" cheese the user
+raised. Note the reach-only rule defuses most of it by itself: five *Troopers* stacked behind a screen
+are outside their own 0.06 reach and contribute nothing. The cap exists for **Marksmen**, who at 0.34
+genuinely can all reach.
+
+**Balance moved with it**, and both are first-guess dials, underived from play: Marksman
+`attackTickSeconds` 0.75 â†’ **0.9** and Turret 0.6 â†’ **0.7**, because both now get genuinely
+uncontested fire. **Reach and damage are untouched** â€” the reach is the Marksman's identity and the
+tick rate is the correct dial, per the standing note from Pass E.
+
+### 4. Tracers come from the model's own barrel
+
+`SiegeUnit` used to fire from `transform.position + up * (engagementRadius * 0.12f)` â€” a height
+derived from the class's *reach*, with no relationship to where the barrel actually is. On a 0.60 m
+board that put the Turret's muzzle around 1.7 cm up a ~5.7 cm figure, i.e. visibly below its own gun.
+New `UnitMuzzle` resolves the weapon part by name against what the FBXs actually expose (`Rifle`,
+`BarrelL`/`BarrelC`/`BarrelR`, `Spear`/`Halberd`/`Blade`, then `WeaponArm`), and returns the
+**forward-most point of that renderer's bounds**, recomputed per shot so it follows the animated arm.
+Multi-barrel models alternate. Measured, never typed â€” the standing rule on this prefab.
+
+### 5. Veteran skins rebuilt as genuinely different models
+
+The user was right that the v2 Veterans were the base model plus greebles â€” `VET_Marksman` was
+`MK_Marksman` with a bandolier, ghillie, hood crest and a second pauldron bolted on. The set is
+rebuilt from scratch in a new `ScrapSiege_VET_v3` Blender collection (the v2 set **moved**, not
+deleted, to a hidden `OLD_VET_v2`):
+
+| Class | Veteran | The silhouette change |
+|---|---|---|
+| Trooper | **Standard Bearer** | back banner, plumed helm, cape, halberd instead of a spear |
+| Bulwark | **Aegis** | slotted pavise + shoulder brace, wider planted stance |
+| Marksman | **Longshot** | crouched, counterweighted long barrel, deployed bipod, mantle |
+| Saboteur | **Infiltrator** | hunched â€” the only figure on the board that is not upright â€” twin blades, lit charge canisters |
+| Turret | **Bastion** | armoured cupola with angled cheeks, twin-linked barrels on a recoil sled, radar vane |
+
+**Colour without breaking the team read.** `U_Body` carries the team colour and that is the single
+most important thing to read on a crowded board, so a paid skin cannot buy distinctiveness with body
+colour. It buys it from three new never-tinted `MaterialSlots` roles â€” `U_Gold`, `U_Steel`, `U_Glow` â€”
+tuned to sit clearly apart from the existing `U_Crest` amber and `U_Metal` grey. **A first attempt
+that used gold as slabs rather than trim buried the team colour and made all five read as "beige
+unit"; the rebuild keeps the team-coloured mass dominant**, and gives the Aegis a team-coloured pavise
+precisely because it is a huge flat side-identifier.
+
+Each Veteran is scaled to its base model's **exact** height (they import at 1.1832 / 0.995 / 0.96 /
+0.795 / 0.72, matching part for part), since the swap normalises height and a taller veteran would
+shrink its own body and read as a downgrade.
+
+**Two export lessons, both worth not repeating:**
+- Author with **every object rotation left at identity** and tilts baked into the vertices. That
+  removes the rotated-parent and `matrix_parent_inverse` traps outright rather than auditing for them
+  afterwards â€” audited anyway, and all 90 objects came back identity.
+- **Zero the rig root's location before exporting.** The rigs are laid out in a row so they can be
+  authored side by side, and that row offset was being written into the FBX root, so every Veteran
+  imported four metres off the origin. Gameplay never saw it (`UnitClassVisual` overwrites the swapped
+  model's `localPosition`) â€” which is exactly what makes it a trap rather than a visible bug.
+
+### 6. Per-class motion â€” and the *other* half of "the attack animation seems weird"
+
+A Marksman was playing the spear THRUST written for the Trooper: a figure holding a rifle lunging
+forward to stab with it. `UnitClass.motion` / `.proMotion` (a `UnitMotionProfile`) now carry gait and
+an `AttackStyle`, read by `UnitAnimator`:
+
+- **Thrust** â€” body drives forward, arm swings through. Trooper, Saboteur.
+- **Recoil** â€” body kicks *backward*, muzzle rises. **Marksman, Turret** â€” the only honest motion for
+  something that fires a tracer rather than reaching its target.
+- **Brace** â€” shield shoves out, body dips behind it. Bulwark.
+- **Swipe** â€” a lateral arc with a matching torso twist. The Standard Bearer's halberd.
+
+Veterans get their own gait (heavy plod for the Aegis, fast low scuttle for the Infiltrator, marching
+cadence for the Standard Bearer). An unauthored profile falls back to the shared defaults, so adding
+the field changed nothing until it was authored.
+
+### Verified â€” and how
+
+A temporary Play-mode probe (deleted afterwards) asserted all five, because these bugs all depend on
+`Awake` having run and an Edit-mode check would have passed while the real thing stayed broken:
+
+- Marksman / Turret / Trooper with Pro active: renderers visible from the **old body = 0**, and still
+  0 **after `VisionTarget.ApplyTier(Full)`** â€” the exact regression, asserted rather than eyeballed.
+- The animator's bound `Torso` is under `ClassModel` for all three.
+- `HasClearLine` false through a terrain box, true beside it.
+- The muzzle point falls inside the `Rifle` / `BarrelL` bounds, at the tip.
+- Five attackers on one target: **3** locked on, `CanAcceptAttacker` false, the other two walked on.
+
+### What Pass G did NOT touch
+
+The sentry overhaul and its deferred cluster (`coverLaneMargin`, re-authoring The Narrows, garrison
+bucketing) â€” only the line-of-sight change above touches sentries. `requireLineOfSight` on deploy is
+still on with its dial-down order in Section 10. `docs/art/unit_lineup_front.png` is unchanged because
+the base models are unchanged. The RevenueCat SDK 7.4.1 to 8.x decision is still open and still the
+user's call.
+

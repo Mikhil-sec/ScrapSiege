@@ -75,14 +75,51 @@ namespace ScrapSiege.Siege
 
                 // Between Awake and Start, which is why SentryArcVisualizer draws its fan in Start -
                 // otherwise the wedge would advertise the unscaled fallback range.
-                if (boardLength > 0f)
+                var sentry = sentryObject.GetComponent<GarrisonSentry>();
+                if (sentry != null)
                 {
-                    var sentry = sentryObject.GetComponent<GarrisonSentry>();
-                    if (sentry != null) sentry.ConfigureForBoard(boardLength);
+                    if (boardLength > 0f) sentry.ConfigureForBoard(boardLength);
+                    sentry.SetVantage(VantageOf(obj, hit.position));
                 }
 
                 spawned++;
             }
+        }
+
+        /// <summary>
+        /// The point this sentry watches from: directly above its anchor's centre, at the anchor's
+        /// own measured top.
+        ///
+        /// <para>Needed because a sentry stands on the ground BESIDE the chokepoint it garrisons -
+        /// the anchor carves a NavMesh hole, so <c>NavMesh.SamplePosition(obj.Center)</c> snaps
+        /// outside its footprint. Once <see cref="GarrisonSentry"/> gained a real line-of-sight test
+        /// (2026-08-13), a ground-level eye would have been blocked by the sentry's own tower, which
+        /// would have silently disabled every sentry in the game and broken Blind Spire outright.
+        /// Watching from the top of the tower is both the fix and what the fiction already claimed.
+        /// </para>
+        ///
+        /// <para>Measured off the spawned visual's renderers rather than computed from the height
+        /// category, per the project-wide rule that sizes come from the model. Falls back to the
+        /// anchor's own centre if the piece somehow has no visual, which degrades to "sees what a
+        /// unit standing there would see" rather than to nothing.</para>
+        /// </summary>
+        private static Vector3 VantageOf(TerrainObjectData anchor, Vector3 fallback)
+        {
+            if (anchor?.Visual == null) return fallback;
+
+            bool any = false;
+            Bounds bounds = default;
+
+            foreach (var renderer in anchor.Visual.GetComponentsInChildren<Renderer>())
+            {
+                if (renderer == null || !renderer.enabled) continue;
+                if (!any) { bounds = renderer.bounds; any = true; }
+                else bounds.Encapsulate(renderer.bounds);
+            }
+
+            if (!any) return fallback;
+
+            return new Vector3(bounds.center.x, bounds.max.y, bounds.center.z);
         }
 
         private Quaternion FacingToward(Vector3 from, Vector3 target)

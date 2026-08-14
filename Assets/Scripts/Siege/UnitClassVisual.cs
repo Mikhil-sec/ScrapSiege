@@ -63,12 +63,15 @@ namespace ScrapSiege.Siege
             if (accessoryTemplate == null) return;
 
             if (definition.silhouette == ClassSilhouette.Turret)
-            {
                 BuildTurret(local, definition.accentColor);
-                return;
-            }
+            else
+                BuildAccessory(definition.silhouette, local, definition.accentColor);
 
-            BuildAccessory(definition.silhouette, local, definition.accentColor);
+            // The primitive path changes which renderers exist too - it adds accessories, and the
+            // Turret silhouette disables the whole figure. Same rule as the model-swap path above:
+            // anything caching renderers at Awake has to be told.
+            var vision = GetComponent<ScrapSiege.Vision.VisionTarget>();
+            if (vision != null) vision.RefreshRenderers();
         }
 
         /// <summary>
@@ -170,11 +173,34 @@ namespace ScrapSiege.Siege
             foreach (var collider in model.GetComponentsInChildren<Collider>(true))
                 Destroy(collider);
 
+            // Everything below is a rebind hook, and the reason they all have to be here is one
+            // rule worth stating plainly: ANY component that caches renderers or child transforms
+            // at Awake is invalidated by this swap. Awake ran at Instantiate, before this model
+            // existed and while the body it replaces was still the only thing on the unit.
+            //
+            // UnitTeamTint and UnitAnimator already had a hook. VisionTarget did NOT, and that
+            // omission is the whole of the 2026-08-13 device report "the pro cosmetics look like
+            // there are 2 models inside each other": it kept the ORIGINAL body's renderer array and
+            // set renderer.enabled = true across it the first time the player laid eyes on the unit,
+            // switching the hidden trooper - spear included - back on inside the class model.
+            //
+            // If a fourth such component is ever added, it needs a hook here too.
+
             var tint = GetComponent<UnitTeamTint>();
             if (tint != null) tint.Apply();
 
+            var vision = GetComponent<ScrapSiege.Vision.VisionTarget>();
+            if (vision != null) vision.RefreshRenderers();
+
+            // Scoped to the new model, NOT re-run over the whole unit. Both of these look parts up
+            // by name, the hidden body still owns those exact names, and it sits earlier in the
+            // hierarchy - so an unscoped re-run finds the old body again and changes nothing. That
+            // is precisely how the previous parameterless Rebind() failed silently.
             var animator = GetComponent<UnitAnimator>();
-            if (animator != null) animator.Rebind();
+            if (animator != null) animator.Rebind(model.transform);
+
+            var muzzle = GetComponent<UnitMuzzle>();
+            if (muzzle != null) muzzle.Rebind(model.transform);
 
             return true;
         }

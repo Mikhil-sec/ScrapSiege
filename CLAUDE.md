@@ -867,3 +867,94 @@ string. This is the honest counterweight to the Turret being gated — see `plan
 
 `docs/art/unit_lineup_front.png` and `unit_lineup_veteran.png` are now **in-engine renders of what
 actually ships**, not Blender previews.
+
+## Current state (2026-08-13, later still) â€” Pass G: the D+E+F device report. EDITOR-VERIFIED, NOT DEVICE-TESTED
+
+Five items from the user's test of the combined Passes D/E/F build. **Two of them were the same two
+root causes.** Full writeup is `plan.md` **Section 13**; this is the summary and the lessons worth not
+re-learning. **Both assemblies compile clean, the Unity console is empty, every reference set this
+pass was read back non-null, and all five items were asserted by a Play-mode probe â€” and none of it
+has run on a phone. Passes D, E and F remain un-device-tested too; one device session covers all four.**
+
+### The model stacking had two causes, and they are the same class of mistake
+
+"The pro cosmetics look like there are 2 models inside each other, one stays static while the other
+moves", plus "the enemy troop's sword is attached to the marksman":
+
+1. **`VisionTarget` cached the renderer array at `Awake`** â€” before `UnitClassVisual` swapped in a
+   class model and disabled the shared body â€” and `ApplyAlpha` writes `renderer.enabled = visible`
+   across that stale list. So the first time the player *saw* an enemy, the hidden trooper (spear
+   included) was switched back on inside the class model. `EnemySiegeUnit.prefab` has `VisionTarget`
+   and `SiegeUnit.prefab` does not, which is exactly why it presented as an **enemy-only** bug.
+2. **`UnitAnimator.Rebind()` re-found the same hidden body.** Its lookup returns the **first** name
+   match in `GetComponentsInChildren<Transform>()`, and `Visual` is child 0 while `ClassModel` is
+   appended last. Clearing the fields and re-running an unscoped lookup is not the same as re-scoping
+   it. **No class model in this game had ever animated, on either team.**
+
+> **Standing rule: any component that caches renderers or child transforms at `Awake` is invalidated
+> by the class-model swap and needs an explicit rebind hook.** `UnitTeamTint` and `UnitAnimator` had
+> one; `VisionTarget` did not. All the hooks now live in one place at the end of
+> `UnitClassVisual.SwapInClassModel` â€” add to that list, do not scatter them.
+
+### Combat: reach-only targeting replaced the symmetric duel
+
+A unit now targets **only what is already inside its own reach, and never chases** â€” acquisition
+radius and attack range are the same number, so "close on the opponent" stopped existing. That is what
+fixes "a marksman shooting a troop far away should not lock the troop onto the marksman": the Trooper
+keeps advancing and stops only when something enters its own 0.06. Targeting is **one-way** â€” being
+shot at neither engages you nor stops you â€” which is what lets several units work on one enemy.
+
+**The cap survived, its value did not.** Uncapped focus fire makes losses scale by Lanchester's square
+law and "deploy the maximum number of units" strictly correct; a cap of exactly one made combined arms
+impossible. Now `maxAttackersPerTarget = 3` with `focusDamageFalloff = 0.6` (100% / 60% / 36%, so
+three attackers total **1.96x, not 3x**) and `immediateThreatBias = 0.35` so a unit answers the enemy
+walking into it rather than the marksman plinking from behind. **If combat ever feels like an
+arithmetic race again, those three values are the first place to look.**
+
+Balance moved with it, both first-guess and underived from play: Marksman `attackTickSeconds`
+0.75 â†’ 0.9, Turret 0.6 â†’ 0.7. Reach and damage untouched.
+
+### Line of sight now applies to every damage source
+
+No damage source in this game had ever tested it. `SiegeUnit` and `GarrisonSentry` both call
+`LineOfSightController.HasClearLine` â€” one implementation of the sight rule, not two â€” from **measured
+mid-heights**, never transform origins (an origin-to-origin ray grazes the board slab and reads as
+blocked). `SiegeUnit` re-checks every attack tick, so walking behind a wall genuinely stops the fire.
+
+**Sentries needed one extra move or this would have broken Blind Spire.** A sentry stands on the
+ground *beside* the chokepoint it garrisons (the anchor carves a NavMesh hole, so
+`SamplePosition(centre)` snaps outside it), so a ground-level ray is blocked by its own tower.
+`MusterPhaseController` now passes the anchor's measured top as `GarrisonSentry.SetVantage`, and
+`SentryFireVisualizer` fires from the same point. **Known and deliberate:** `SentryArcVisualizer` still
+draws an un-carved wedge, so the drawn arc now slightly over-promises behind tall terrain.
+
+### Tracers come from the barrel, not from a number
+
+`SiegeUnit` fired from `engagementRadius * 0.12` above the origin â€” a height derived from *reach*,
+unrelated to the model, which put the Turret's muzzle visibly below its own gun. New `UnitMuzzle`
+resolves the weapon part by name (`Rifle`, `BarrelL/C/R`, `Spear/Halberd/Blade`, `WeaponArm`) and
+returns the forward-most point of its **measured** bounds, per shot, so it follows the animated arm.
+
+### The Veteran skins are new models, not the base plus greebles
+
+Rebuilt in a new `ScrapSiege_VET_v3` collection (v2 **moved**, not deleted, to a hidden `OLD_VET_v2`):
+Standard Bearer, Aegis, Longshot, Infiltrator, Bastion â€” each a different silhouette at its base
+model's **exact** height. Colour comes from three new never-tinted `MaterialSlots` roles (`U_Gold`,
+`U_Steel`, `U_Glow`), because `U_Body` belongs to the team colour and that read is load-bearing.
+**A first attempt used gold as slabs and buried the team colour â€” all five read as "beige unit".
+Veteran palette is trim, never mass.**
+
+Two Blender export rules earned here:
+- **Author with every object rotation at identity** and tilts baked into the vertices. That removes
+  the rotated-parent and `matrix_parent_inverse` traps rather than auditing for them afterwards.
+- **Zero the rig root's location before exporting.** The authoring row offset was being written into
+  the FBX root, so every Veteran imported four metres off the origin. Gameplay never saw it
+  (`UnitClassVisual` overwrites `localPosition`), which is what makes it a trap rather than a bug.
+
+### Per-class motion, and the other half of "the attack animation seems weird"
+
+A Marksman was playing the spear THRUST written for the Trooper â€” a rifle-armed figure lunging to stab.
+`UnitClass.motion` / `.proMotion` now carry gait plus an `AttackStyle`: **Thrust** (Trooper, Saboteur),
+**Recoil** (Marksman, Turret â€” the body kicks *backward*), **Brace** (Bulwark), **Swipe** (the Standard
+Bearer's halberd). Veterans get their own gait. An unauthored profile falls back to the old defaults.
+

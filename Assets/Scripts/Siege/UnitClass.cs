@@ -151,6 +151,24 @@ namespace ScrapSiege.Siege
         [Range(0.5f, 2f)]
         public float modelScaleMultiplier = 1f;
 
+        [Header("Motion")]
+        [Tooltip("How this class walks and attacks. Leave 'Override Defaults' off and it moves " +
+                 "exactly as every unit did before per-class motion existed.\n\n" +
+                 "Worth authoring for two reasons: gross motion is the entire animation budget at " +
+                 "5cm (no rig is legible at that size), and the attack style is what stops a " +
+                 "Marksman playing the spear THRUST written for the Trooper - a rifle-armed figure " +
+                 "lunging forward to stab was reported from device as 'the attack animation seems " +
+                 "weird'.")]
+        public UnitMotionProfile motion = new UnitMotionProfile();
+
+        [Tooltip("Optional Veteran motion, used instead of the profile above while the RevenueCat " +
+                 "'pro' entitlement is active - the movement half of the cosmetic tier. Purely " +
+                 "visual: it must not change reach, speed or fight length, because a cosmetic that " +
+                 "buys an advantage is not a cosmetic.\n\n" +
+                 "Falls back to the base profile when unticked, so a class with a Veteran model but " +
+                 "no Veteran gait simply moves normally.")]
+        public UnitMotionProfile proMotion = new UnitMotionProfile();
+
         [Tooltip("Fallback silhouette, used ONLY when modelPrefab is empty: a crude high-contrast " +
                  "accessory built from primitives in code (see UnitClassVisual) so a brand-new class " +
                  "is readable before anyone opens Blender. Every shipped class now has a real model, " +

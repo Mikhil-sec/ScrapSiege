@@ -138,7 +138,15 @@ namespace ScrapSiege.Siege
         {
             if (tracer == null) return;
 
-            Vector3 muzzle = transform.position + Vector3.up * muzzleHeight;
+            // Read off the sentry rather than re-derived, so the tracer starts exactly where the
+            // line-of-sight test says the sentry is watching from - the top of the chokepoint it
+            // garrisons, not the ground beside it. A visual that computes its own answer can
+            // disagree with the rule; that is how SentryArcVisualizer once drew at 4% of its range.
+            var sentry = GetComponent<GarrisonSentry>();
+            Vector3 muzzle = sentry != null
+                ? sentry.EyePoint
+                : transform.position + Vector3.up * muzzleHeight;
+
             Vector3 impact = AimPoint(target);
 
             tracer.SetPosition(0, muzzle);
