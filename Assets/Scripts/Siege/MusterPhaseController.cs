@@ -68,10 +68,14 @@ namespace ScrapSiege.Siege
                     || obj.Archetype == TerrainArchetype.Watchtower;
                 if (!isChokepoint) continue;
 
-                if (!NavMesh.SamplePosition(obj.Center, out NavMeshHit hit, snapDistance, NavMesh.AllAreas))
+                if (!TryFindStation(obj, threatOrigin, snapDistance, out Vector3 station))
+                {
+                    Debug.LogWarning($"MusterPhaseController: found no walkable ground beside the " +
+                                     $"{obj.Archetype} at {obj.Center} - no sentry stationed there.", this);
                     continue;
+                }
 
-                var sentryObject = Instantiate(garrisonUnitPrefab, hit.position, FacingToward(hit.position, threatOrigin));
+                var sentryObject = Instantiate(garrisonUnitPrefab, station, FacingToward(station, threatOrigin));
 
                 // Between Awake and Start, which is why SentryArcVisualizer draws its fan in Start -
                 // otherwise the wedge would advertise the unscaled fallback range.
@@ -79,12 +83,115 @@ namespace ScrapSiege.Siege
                 if (sentry != null)
                 {
                     if (boardLength > 0f) sentry.ConfigureForBoard(boardLength);
-                    sentry.SetVantage(VantageOf(obj, hit.position));
+                    sentry.SetVantage(VantageOf(obj, station));
                 }
 
                 spawned++;
             }
         }
+
+        [Tooltip("How far clear of the chokepoint's own footprint the sentry stands, as a fraction " +
+                 "of board length. Big enough that it is not clipping into the tower, small enough " +
+                 "that it still reads as garrisoning it.")]
+        [SerializeField] private float stationClearanceFraction = 0.02f;
+
+        /// <summary>
+        /// Finds walkable ground BESIDE the chokepoint, on the side the attack is coming from.
+        ///
+        /// <para><b>This replaces sampling the anchor's own centre, which put every sentry in the
+        /// game inside the tower it was garrisoning.</b> The old code did
+        /// <c>NavMesh.SamplePosition(obj.Center, snapDistance)</c> and relied on the anchor's
+        /// NavMeshObstacle having carved a hole, so the sample would be pushed outside. Two things
+        /// were wrong with that. First, carving is a deferred runtime update and this runs in the
+        /// same frame the terrain was instantiated and the surface baked, so no hole exists yet.
+        /// Second, even if it had, the snap distance is smaller than the footprint it would have to
+        /// escape: measured on The Narrows, the spire's half-width is 0.17 while the snap radius is
+        /// 0.12, so every reachable sample is still inside the tower. The sentry therefore stood
+        /// inside an opaque, sight-blocking spire - invisible on screen, and permanently Hidden to
+        /// <see cref="ScrapSiege.Vision.VisionTarget"/> because its own tower blocked every ray from
+        /// the camera. Reported from device 2026-08-14 as "I cannot see the sentry".</para>
+        ///
+        /// <para>Placing it toward the threat is a design choice as much as a fix: the sentry is the
+        /// thing the level's briefing promises, so it should be the face of the chokepoint rather
+        /// than something tucked behind it. The ring fallback exists because that side may be walled
+        /// off on some layout, and a sentry standing somewhere odd is strictly better than a level
+        /// that silently ships with no defender.</para>
+        /// </summary>
+        private bool TryFindStation(TerrainObjectData anchor, Vector3 threatOrigin, float snapDistance, out Vector3 station)
+        {
+            station = anchor.Center;
+
+            // Measured from the piece's own footprint, so a wide watchtower pushes its sentry
+            // further out than a narrow spire without anyone tuning a second number.
+            float halfX = anchor.FootprintX * 0.5f;
+            float halfZ = anchor.FootprintZ * 0.5f;
+            float clearance = boardPlane != null && boardPlane.Length > 0f
+                ? stationClearanceFraction * boardPlane.Length
+                : ScrapSiege.Core.WorldScale.Metres(0.02f);
+            float standOff = Mathf.Sqrt(halfX * halfX + halfZ * halfZ) * TerrainMarginMultiplier + clearance;
+
+            Vector3 toThreat = threatOrigin - anchor.Center;
+            toThreat.y = 0f;
+            Vector3 bearing = toThreat.sqrMagnitude > 1e-6f ? toThreat.normalized : Vector3.back;
+
+            // Toward the threat first, then progressively further round. Alternating signs means the
+            // fallbacks stay as close to the intended side as possible instead of walking round one
+            // way and ending up directly behind the tower on the first failure.
+            foreach (float degrees in StationSearchBearings)
+            {
+                Vector3 offset = Quaternion.Euler(0f, degrees, 0f) * bearing * standOff;
+                Vector3 candidate = anchor.Center + offset;
+
+                if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit, snapDistance, NavMesh.AllAreas))
+                    continue;
+
+                // The sample can be dragged back under the tower it was placed to avoid, which would
+                // reintroduce the exact bug this method exists to fix - so the result is re-checked
+                // against the footprint rather than trusted. Compared axis-aligned against the
+                // MARGINED footprint (what is actually drawn): chokepoints are near-square, so the
+                // piece's own yaw makes no meaningful difference to a rejection test.
+                Vector3 local = hit.position - anchor.Center;
+                if (Mathf.Abs(local.x) < halfX * TerrainMarginMultiplier
+                    && Mathf.Abs(local.z) < halfZ * TerrainMarginMultiplier) continue;
+
+                // ...and not inside ANY other sight-blocking piece either. The whole point of moving
+                // the sentry is that the player can see it, so the test that matters is not "is it
+                // clear of its own anchor" but "is it standing in something opaque" - and only the
+                // occluder layer answers that. Rubble and cover deliberately pass: they are
+                // knee-high, block neither sight nor movement, and a sentry posted among rubble is a
+                // fine place for a sentry to be. Found by the Editor probe, which put the first
+                // version of this method's output inside a rubble pile.
+                if (IsInsideOccluder(hit.position)) continue;
+
+                station = hit.position;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Matches TerrainObjectSpawner's own footprint margin, so the standoff clears the model that is actually drawn.</summary>
+        private const float TerrainMarginMultiplier = 1.15f;
+
+        private static readonly Collider[] OccluderHits = new Collider[4];
+
+        /// <summary>
+        /// True if <paramref name="point"/> is inside a piece of terrain that blocks sight.
+        ///
+        /// Queried against <see cref="ScrapSiege.Core.SiegeLayers.TerrainOccluderMask"/> - the same
+        /// mask <see cref="ScrapSiege.Vision.LineOfSightController"/> raycasts - so "will the player
+        /// be able to see a sentry here" is answered by the layer that actually decides it, rather
+        /// than by a second list of archetypes that could drift out of step with the first.
+        /// </summary>
+        private static bool IsInsideOccluder(Vector3 point)
+        {
+            return Physics.OverlapSphereNonAlloc(
+                point, 0f, OccluderHits,
+                ScrapSiege.Core.SiegeLayers.TerrainOccluderMask,
+                QueryTriggerInteraction.Ignore) > 0;
+        }
+
+        private static readonly float[] StationSearchBearings = { 0f, 35f, -35f, 70f, -70f, 110f, -110f, 150f, -150f, 180f };
 
         /// <summary>
         /// The point this sentry watches from: directly above its anchor's centre, at the anchor's

@@ -79,6 +79,28 @@ namespace ScrapSiege.Levels
         public int parUnitsLost = 5;
 
         /// <summary>
+        /// Stars earned for a WON match: one for winning at all, one for beating
+        /// <see cref="parTimeSeconds"/>, one for beating <see cref="parUnitsLost"/>.
+        ///
+        /// <para>Both pars have been authored on every level since levels existed and were read by
+        /// absolutely nothing until 2026-08-14 - the rating is the cheapest content the project has,
+        /// because the design work was already done and only the arithmetic was missing. Winning is
+        /// worth a star on its own so a rating can never read as a failure; the other two are the
+        /// two axes the game actually has, speed and attrition.</para>
+        ///
+        /// <para>A par of zero or less means "this level does not grade that axis", and awards the
+        /// star rather than withholding it - an unauthored threshold must not silently make a level
+        /// unrateable.</para>
+        /// </summary>
+        public int StarsFor(float seconds, int unitsLost)
+        {
+            int stars = 1;
+            if (parTimeSeconds <= 0f || seconds <= parTimeSeconds) stars++;
+            if (parUnitsLost <= 0 || unitsLost <= parUnitsLost) stars++;
+            return stars;
+        }
+
+        /// <summary>
         /// Converts a normalised board coordinate into a position in the board root's local space,
         /// where the board is 1.0 long on z and <see cref="boardAspect"/> wide on x, centred on the
         /// root. Keeping this on the asset means every consumer maps coordinates identically.

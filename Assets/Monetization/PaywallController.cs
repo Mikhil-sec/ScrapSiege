@@ -164,16 +164,26 @@ public class PaywallController : MonoBehaviour
         });
     }
 
-    /// <summary>Wire to a "Restore Purchases" button.</summary>
+    /// <summary>
+    /// Wire to a "Restore Purchases" button.
+    ///
+    /// <para>The button is disabled for the duration, exactly as Subscribe already was. Without it a
+    /// held finger issued one RestorePurchases network call per tap event with nothing bounding it -
+    /// the only unthrottled store call the app had. <see cref="MonetizationManager"/> now refuses
+    /// overlapping operations regardless, so this is the visible half of the same guard rather than
+    /// the guard itself.</para>
+    /// </summary>
     public void OnRestorePressed()
     {
         if (!TryGetManager(out var manager)) return;
 
+        if (restoreButton != null) restoreButton.interactable = false;
         SetStatus("Restoring...");
 
         manager.Restore((success, error) =>
         {
             SetStatus(success ? "Restored." : (error ?? "Restore failed."));
+            if (restoreButton != null) restoreButton.interactable = true;
         });
     }
 

@@ -120,6 +120,10 @@ namespace ScrapSiege.Levels
                 return;
             }
 
+            // Before any piece is spawned: cover lanes are sized from this, and a piece placed
+            // without it would lay down a lane in absolute metres on a board measured in fractions.
+            terrainSpawner.SetBoardLength(boardLength);
+
             BuildGround(level, boardRoot, boardLength);
             BuildBoardSurface(level, boardRoot);
 

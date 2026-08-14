@@ -24,8 +24,14 @@ namespace ScrapSiege.Siege
 
         [Tooltip("Detection range as a fraction of board length. At the old absolute 0.2m a sentry " +
                  "covered a THIRD of a 0.60m board, so there was barely anywhere safe to walk and the " +
-                 "Direct-vs-Covered route choice lost most of its meaning.")]
-        [SerializeField] private float detectionRadiusFraction = 0.20f;
+                 "Direct-vs-Covered route choice lost most of its meaning.\n\n" +
+                 "Raised 0.20 -> 0.26 on 2026-08-14, as the other half of 'the sentry does not look " +
+                 "like it is shooting at any troops'. Cover lanes becoming board-relative (see " +
+                 "TerrainObjectSpawner.coverLaneMarginFraction) opened up roughly 40% of The Narrows " +
+                 "as genuinely uncovered ground; 0.20 only reached a third of the way into it, so a " +
+                 "unit could walk the open flank and still never be fired on. At 0.26 the open flank " +
+                 "is actually watched, which is what the level's briefing has always claimed.")]
+        [SerializeField] private float detectionRadiusFraction = 0.26f;
 
         [SerializeField] private float navMeshSampleFraction = 0.02f;
 

@@ -697,7 +697,7 @@ namespace ScrapSiege.UI
 
         private void HandlePlayerWon()
         {
-            ShowOutcome("VICTORY", UITheme.TextPrimary, "The enemy base is scrap.");
+            ShowOutcome("VICTORY", UITheme.TextPrimary, BuildResultLine(won: true));
             SetPrompt("Base destroyed.");
         }
 
@@ -707,8 +707,47 @@ namespace ScrapSiege.UI
         /// </summary>
         private void HandlePlayerLost()
         {
-            ShowOutcome("DEFEAT", new Color(0.90f, 0.35f, 0.30f), "Your base has been overrun.");
+            ShowOutcome("DEFEAT", new Color(0.90f, 0.35f, 0.30f), BuildResultLine(won: false));
             SetPrompt("Your base has fallen.");
+        }
+
+        /// <summary>
+        /// The result card's body: what happened, how it went, and - on a win - the star rating.
+        ///
+        /// <para><b>This is the first thing in the project to read <c>parTimeSeconds</c> and
+        /// <c>parUnitsLost</c>.</b> Both have been authored on every level since levels existed and
+        /// were consumed by nothing at all, so the design work for a rating was already done and
+        /// only the arithmetic was missing. That makes it the cheapest content available here, and
+        /// it is the thing that turns a match from "a demo that ends" into a result worth replaying
+        /// for - which matters a lot more during a two-week closed test than another system would.
+        /// </para>
+        ///
+        /// <para>Built as text into the card's existing body label rather than as a new row of star
+        /// images, deliberately: it needs no scene authoring, so it cannot half-ship on a scene that
+        /// was not re-saved - the failure mode that has cost this project the most time. Upgrading it
+        /// to real star sprites later is a drop-in.</para>
+        ///
+        /// <para>A defeat gets the same summary minus the rating. Rating a loss would either be a
+        /// consolation star (dishonest) or zero stars (a second punishment for the same event).</para>
+        /// </summary>
+        private string BuildResultLine(bool won)
+        {
+            string headline = won ? "The enemy base is scrap." : "Your base has been overrun.";
+            string summary = $"Time {ScrapSiege.Siege.MatchStats.FormatDuration(ScrapSiege.Siege.MatchStats.ElapsedSeconds)}"
+                             + $"   Lost {ScrapSiege.Siege.MatchStats.PlayerUnitsLost}"
+                             + $"   Killed {ScrapSiege.Siege.MatchStats.EnemyUnitsLost}";
+
+            var level = levelMatch != null ? levelMatch.ActiveLevel : null;
+            if (!won || level == null) return $"{headline}\n{summary}";
+
+            int stars = level.StarsFor(ScrapSiege.Siege.MatchStats.ElapsedSeconds,
+                                       ScrapSiege.Siege.MatchStats.PlayerUnitsLost);
+            bool improved = ScrapSiege.Levels.LevelProgress.RecordStars(level, stars);
+
+            string rating = ScrapSiege.Levels.LevelProgress.StarGlyphs(stars);
+            if (improved) rating += "   NEW BEST";
+
+            return $"{headline}\n{summary}\n{rating}";
         }
 
         private void ShowOutcome(string title, Color titleColor, string body)

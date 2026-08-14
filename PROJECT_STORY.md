@@ -196,21 +196,38 @@ convincing were all wrong.
   cheap and catches all of it.
 - A defensive null-check that quietly does nothing can hide a real bug for an entire test
   session — failing loudly is almost always better than failing silently.
+- **One reported symptom is not one bug.** "I can't see the sentry and it isn't shooting" sounded
+  like a single problem and was two, months apart in origin. The sentry was standing *inside* the
+  stone spire it was posted to guard — we had asked the navigation system where the walkable ground
+  was in the same frame we created the obstacle, and obstacles don't take effect until the next one,
+  so it cheerfully answered "right here, in the middle of the rock." And separately, the safe cover
+  it was meant to punish you for leaving had grown to cover 90% of the board, so even a sentry
+  standing in the open had almost nothing it was allowed to shoot at. Fixing either one alone would
+  have looked like the fix failed.
+- **Measure before you tune.** We nearly guessed at both of those. Instead we printed the actual
+  numbers — footprint half-width 0.17 versus a search radius of 0.12; a cover lane 41% of the
+  board's width; 14% of the board both in range and shootable — and the fixes stopped being opinions.
 
 ## What's next for Scrap Siege
 
-- **The AI commander.** It's the missing half of the design: Rally, reacting to a threat, and
-  difficulty tuning are all inert until there's an opponent making moves worth reacting to.
-- **Level tuning from our first full hands-on playtest.** Playing the flagship level end to end
-  for the first time showed cover was still too generous and the "one safe corridor" premise
-  wasn't actually being enforced — exactly the kind of thing that only shows up once a level
-  is genuinely playable rather than reasoned about on paper.
-- The player-side base and a real lose condition.
+*Since this section was first written, the AI commander, the player base and the lose condition,
+five unit classes, star ratings and the real on-device purchase have all shipped. What remains:*
+
+- **Closed testing.** Google Play requires twelve testers over fourteen days before a production
+  release, and we intend to use that fortnight properly — shipping a small polish build or a new
+  level every two or three days rather than sitting on one build and waiting out the clock.
+- **Recorded audio over the procedural layer.** Every sound in the game is synthesized in code
+  today, which was the right call for a solo build with no licensing to track, and it is also the
+  most obvious remaining gap the moment anyone puts headphones on.
+- **Balance derived from play rather than from measurement.** Five classes, two AI tiers and a
+  frontage cap are all currently tuned from design intent and arithmetic. Real testers are the only
+  thing that can finish that job.
+- **Re-authoring The Narrows** so its central wall genuinely forms the one safe corridor its
+  briefing promises. We fixed the tuning that made cover free; the layout itself is still a
+  redesign we would rather do deliberately than nudge.
 - Board elevation — a raised plateau that would make line of sight genuinely three-dimensional,
   so you crouch to look along a ridge and rise to see over it. Held deliberately until the flat
   maps are proven, because navigation at tabletop scale has already bitten us twice.
-- More authored levels, star ratings, sound.
-- Pro level packs behind the already-built entitlement. The Google Play Console product,
-  RevenueCat registration and a signed release build are done; what's left is uploading to
-  Internal Testing and completing one real on-device purchase, rather than only in the Editor.
+- More authored levels, and more for Pro to sell that isn't power. The Veteran skin set was the
+  first deliberate step away from "pay for the strong unit," and it is the direction we want.
 - The demo video and submission assets.

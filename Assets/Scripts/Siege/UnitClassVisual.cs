@@ -50,7 +50,20 @@ namespace ScrapSiege.Siege
                                  "could not be swapped in - falling back to the primitive silhouette.", this);
             }
 
-            if (definition.silhouette == ClassSilhouette.None) return;
+            // No authored model: the shared trooper body IS this unit's model, so it is what the
+            // ground plate rule and ActiveModelRoot have to refer to. The Trooper class reaches here
+            // by design (silhouette None, no modelPrefab) and used to return one line later without
+            // either ever being applied to it.
+            Transform shared = FindBodyRoot();
+            ActiveModelRoot = shared;
+            ApplyGroundPlateRule(definition, shared);
+
+            if (definition.silhouette == ClassSilhouette.None)
+            {
+                var sharedVision = GetComponent<ScrapSiege.Vision.VisionTarget>();
+                if (sharedVision != null) sharedVision.RefreshRenderers();
+                return;
+            }
 
             Bounds local = MeasureLocalBounds();
             if (local.size.y <= 0f) return;
@@ -154,6 +167,14 @@ namespace ScrapSiege.Siege
 
             model.transform.localScale = importScale * (targetHeight / modelHeight);
 
+            // Deliberately AFTER the height normalisation above and BEFORE the grounding below.
+            // Measuring the model with its plate still on keeps every unit exactly the size it was
+            // before the plate was ever hidden (the plate is 4-8% of a model's height, so measuring
+            // without it would silently scale every unit up by that much); grounding afterwards is
+            // what stops the body floating where the plate used to hold it up.
+            ActiveModelRoot = model.transform;
+            ApplyGroundPlateRule(definition, model.transform, reground: false);
+
             // Sit the model's feet on the same plane the old body stood on. Authored models have a
             // hairline of geometry below zero from the base disc's bottom face; without this they
             // hover or sink by a fraction of a millimetre, which at 5cm is visible as a float.
@@ -206,6 +227,130 @@ namespace ScrapSiege.Siege
         }
 
         private const string ClassModelName = "ClassModel";
+
+        /// <summary>
+        /// The object name every unit model in <c>Assets/Models</c> gives its little square stand.
+        /// Matched by name for the same reason <see cref="UnitAnimator"/> finds Torso/Leg_L/Leg_R by
+        /// name: it works straight off a Blender FBX import with no per-model Inspector wiring, and
+        /// a model that does not have one simply keeps whatever it does have.
+        /// </summary>
+        private const string GroundPlateName = "Base";
+
+        /// <summary>
+        /// The transform carrying whatever body this unit is actually wearing - a swapped-in class
+        /// model, or the shared trooper body when the class has no model of its own.
+        ///
+        /// <para>Exposed because the root transform is not a safe thing to animate: it carries the
+        /// NavMeshAgent, which owns position, and combat/movement code writes its rotation. Anything
+        /// that wants to visually deform the unit (currently <see cref="SiegeUnit"/>'s emplacement
+        /// breakdown) has to act on the model instead.</para>
+        /// </summary>
+        public Transform ActiveModelRoot { get; private set; }
+
+        /// <summary>
+        /// Hides the small square stand a unit model is authored on, unless this class is one that
+        /// should keep it.
+        ///
+        /// <para><b>Why the stand exists at all and why it now goes.</b> Every model in
+        /// <c>Assets/Models</c> is built on a disc/plate so it stands up in Blender and in the
+        /// lineup renders in <c>docs/art/</c>. In the game the unit is already standing on a board,
+        /// so the plate reads as a chess-piece base sliding around the table under a soldier -
+        /// reported from device 2026-08-14 as "all the models stand on a mini square platform".</para>
+        ///
+        /// <para><b>Emplacements keep theirs, and that is the whole distinction.</b> A turret is
+        /// bolted down; a plate under it reads as a mount, which is correct. A marching soldier
+        /// dragging one does not. Sentries are unaffected without needing a rule here at all,
+        /// because <see cref="ScrapSiege.Siege.MusterPhaseController"/> never applies a class to
+        /// them, so this method is never reached for a garrison unit.</para>
+        ///
+        /// <para>The renderer is disabled rather than the GameObject destroyed: <c>Base</c> is a
+        /// real node in the FBX hierarchy that other parts may be parented to, and this project has
+        /// already learned that quietly restructuring an imported hierarchy is how models end up
+        /// half-built. Disabling is also what every other "hide this body" path here does, so
+        /// <see cref="UnitDeathEffect"/> and <see cref="ScrapSiege.Vision.VisionTarget"/> skip it
+        /// for free - they both already ignore disabled renderers.</para>
+        /// </summary>
+        /// <param name="reground">
+        /// False on the model-swap path only, where the caller sets the model's localPosition
+        /// absolutely from its own re-measurement one line later - regrounding here as well would
+        /// compute the identical offset twice and invite the two from drifting apart.
+        /// </param>
+        private void ApplyGroundPlateRule(UnitClass definition, Transform modelRoot, bool reground = true)
+        {
+            if (modelRoot == null) return;
+            if (definition != null && definition.IsStationary) return;
+
+            if (HideGroundPlate(modelRoot) && reground) RegroundBody(modelRoot);
+        }
+
+        /// <summary>Disables every renderer named <see cref="GroundPlateName"/>. True if any was hidden.</summary>
+        private static bool HideGroundPlate(Transform modelRoot)
+        {
+            bool hidAny = false;
+
+            foreach (var part in modelRoot.GetComponentsInChildren<Transform>(true))
+            {
+                if (part.name != GroundPlateName) continue;
+
+                foreach (var renderer in part.GetComponents<Renderer>())
+                {
+                    if (renderer == null || !renderer.enabled) continue;
+                    renderer.enabled = false;
+                    hidAny = true;
+                }
+            }
+
+            return hidAny;
+        }
+
+        /// <summary>
+        /// Drops the body back onto the table after its plate was hidden.
+        ///
+        /// <para>Measured, never assumed: the plates are 4-8% of a model's height and some models
+        /// stand ON theirs (the shared trooper's legs start a quarter of the way up its plate) while
+        /// others pass through it. Without this the units that stood on theirs would hover by that
+        /// gap - a millimetre at 5cm, which is exactly the size of "float" this project has already
+        /// shipped once and had reported back.</para>
+        /// </summary>
+        private void RegroundBody(Transform modelRoot)
+        {
+            float gap = MeasureWorldMinY(modelRoot.gameObject) - transform.position.y;
+            if (Mathf.Abs(gap) < 1e-6f) return;
+
+            float parentScale = Mathf.Max(Mathf.Abs(modelRoot.parent != null
+                ? modelRoot.parent.lossyScale.y
+                : transform.lossyScale.y), 1e-6f);
+
+            modelRoot.localPosition -= new Vector3(0f, gap / parentScale, 0f);
+        }
+
+        /// <summary>
+        /// The child holding the shared trooper body, for classes that never swap a model in.
+        ///
+        /// Located by looking for the plate rather than by hard-coding the prefab's "Visual" child
+        /// name, so renaming that child in the prefab cannot silently turn this into a no-op - the
+        /// exact failure mode that made <see cref="UnitAnimator.Rebind"/> a three-pass bug.
+        /// </summary>
+        private Transform FindBodyRoot()
+        {
+            foreach (Transform child in transform)
+            {
+                if (child.name == ClassModelName) return child;
+                if (child.GetComponentsInChildren<Transform>(true).Length > 1
+                    && HasDescendantNamed(child, GroundPlateName))
+                    return child;
+            }
+
+            return null;
+        }
+
+        private static bool HasDescendantNamed(Transform root, string childName)
+        {
+            foreach (var part in root.GetComponentsInChildren<Transform>(true))
+                if (part.name == childName) return true;
+
+            return false;
+        }
 
         private static float MeasureWorldHeight(GameObject root)
         {

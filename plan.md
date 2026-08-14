@@ -972,3 +972,200 @@ still on with its dial-down order in Section 10. `docs/art/unit_lineup_front.png
 the base models are unchanged. The RevenueCat SDK 7.4.1 to 8.x decision is still open and still the
 user's call.
 
+
+---
+
+## 14. Pass H — the Pass G device report + closed-testing polish (2026-08-14)
+
+Three items from the user's device test of Pass G, plus a self-directed quality-of-life pass and an
+abuse-hardening review of the purchase paths ahead of Play's mandatory 14-day / 12-tester closed test.
+**Editor-verified with a Play-mode probe (measurements below). Not yet run on a phone.**
+
+### 1. "I cannot see the sentry, and it does not look like it is shooting" — two separate causes
+
+Reported as one symptom; it was two independent bugs, and the first had been shipping since authored
+levels landed.
+
+**Cause A — every sentry in the game stood INSIDE the tower it garrisoned.**
+`MusterPhaseController` sampled the NavMesh at the chokepoint's own centre and relied on the piece's
+`NavMeshObstacle` having carved a hole to push the sample outside. Two things were wrong with that:
+
+- Carving is a **deferred runtime update**, and `SpawnGarrison` runs in the same synchronous call as
+  `LevelBuilder.Build` and `NavMeshSurface.BuildNavMesh` — so no hole exists yet.
+- Even if it had, the snap radius is **smaller than the footprint it would have to escape**. Measured
+  on The Narrows: spire half-width `0.1725`, snap distance `0.04 x 3.0 = 0.12`. Every reachable
+  sample is still inside the tower.
+
+So the sentry sat inside an opaque, sight-blocking spire — invisible on screen *and* permanently
+`Hidden` to `VisionTarget`, because its own tower blocked every ray from the camera. Generalise:
+**never rely on NavMesh carving having been applied in the frame the obstacle was created.**
+
+Fixed with `MusterPhaseController.TryFindStation`, which places the sentry **clear of the anchor's
+measured footprint, on the side the attack comes from**, then re-checks the result two ways — against
+the margined footprint, and against `SiegeLayers.TerrainOccluderMask` (the same mask
+`LineOfSightController` uses, so "can the player see it" is answered by the layer that decides it).
+A ten-bearing ring fallback means an odd layout gets a sentry standing somewhere unusual rather than
+a level that silently ships with no defender.
+
+*Measured after the fix:* sentry `0.44` clear of the spire's centre, inside **0** occluders, and
+`HasClearLine` from a plausible player eye returns **true**. Rubble is deliberately still accepted as
+a station — it is knee-high, blocks neither sight nor movement, and a sentry among rubble is fine.
+
+**Cause B — `coverLaneMargin` was the last absolute distance in the project, and it made cover free.**
+This is Open Question 3 from 2026-08-08, finally closed because the user was now reporting its
+downstream symptom. At `0.05` real metres per side, on a board `1.65` units wide:
+
+| lane | before | after (`0.035 x boardLength`) |
+|---|---|---|
+| wall barricade | 0.6725 (41% of board width) | **0.3825** |
+| each rubble pile | 0.8105 (49%) | **0.5205** |
+
+Cover previously blanketed everything from the left edge to just past centre, leaving one uncovered
+strip `0.544` wide — of which the single sentry's `0.20 x L = 0.60` reach overlapped only `0.23`, i.e.
+**14% of the board's width was both in range and shootable.** That is why it never fired.
+
+`detectionRadiusFraction` also went `0.20 -> 0.26` (reach `0.78`), so the now-genuinely-open right
+flank is actually watched. Net: roughly **a third of the board width** is in-range uncovered ground,
+against 14% before. The level's briefing ("one safe corridor, one sentry watching it") is true for the
+first time.
+
+**Deliberately still not done:** re-authoring The Narrows so the wall is central (Open Question 1).
+That is a layout redesign, not a tuning fix, and it should be judged against these new numbers first.
+
+### 2. The Pro Turret was overpowered — three changes, and a timer is the real one
+
+| | before | after |
+|---|---|---|
+| `attackDamage` | 5 | **4** |
+| `attackTickSeconds` | 0.7 | **0.8** |
+| effective DPS | 7.14 | **5.0** (-30%) |
+| `cost` | 4 | **3** |
+| `lifetimeSeconds` | infinite | **12** (1.8s of it a visible breakdown) |
+
+Reach (`0.24 x L`) and health (40) are untouched: **reach is the class's identity and tick rate is the
+correct dial** — the standing rule from Pass E.
+
+**Why the timer matters more than the damage.** Reach-only combat means nothing chases and an
+emplacement never advances, so a turret dropped off the AI's line of advance is a unit that literally
+cannot be answered, and turrets accumulate for a whole match. It was already the one Pro perk that
+touched power (Section 10 has always flagged it). A clock converts it from a permanent wall into a
+**window of denial** — still the only thing that holds ground you cannot watch, but a cost you have to
+keep paying. Cost dropped to 3 to keep it worth buying: the economy banks 1 scrap per 2s, so 12
+seconds of turret is now six seconds of income rather than eight.
+
+**It was already targetable by hostile units** — `SiegeUnit.FindTarget` walks the shared `Active` list
+and filters only on team/alive/reach/line-of-sight, so an enemy that walks within its own reach of a
+turret engages it exactly like any other unit. What was missing was any way to *make* something reach
+it, which the timer supplies.
+
+**The breakdown is animated, not a despawn.** A unit that blinks out is indistinguishable from a bug,
+and this project has already lost a session to exactly that symptom (it is why `UnitDeathEffect`
+exists). The last 1.8s are spent visibly failing: it stops firing, frees the attacker slot it held,
+sags and topples on a per-unit random axis with an accelerating spark burst, and then comes apart
+through the normal death debris — so a broken turret and a killed turret end the same way. Everything
+is applied to `UnitClassVisual.ActiveModelRoot`, never to the unit's own transform, because the root
+carries the NavMeshAgent and is written by the facing code.
+
+An expiring turret is **not** counted in `MatchStats.PlayerUnitsLost`. It is a cost the player chose,
+and counting it would make deploying the class a guaranteed hit to the efficiency star.
+
+*Measured:* with the lifetime temporarily set to 3s/1.2s, breakdown began at exactly `t=1.80s` and the
+unit was destroyed at exactly `t=3.00s`, with `PlayerUnitsLost` still 0.
+
+### 3. The little square stand under every unit
+
+Every model in `Assets/Models` is authored on a plate (`Base`, 4-8% of the model's height, roughly
+half its width) so it stands up in Blender and in the `docs/art/` lineup renders. On a board the unit
+is already standing on something, so the plate read as a chess-piece base sliding around under a
+soldier.
+
+`UnitClassVisual.ApplyGroundPlateRule` hides it — **for mobile classes only.** Emplacements keep
+theirs, because a plate under a bolted-down turret reads as a mount, which is correct. Sentries need
+no rule at all: `MusterPhaseController` never applies a class to them, so the code is never reached.
+
+Three details that make it safe rather than a re-run of the model bugs of Pass F and G:
+
+- The renderer is **disabled, not destroyed**. `Base` is a real FBX node other parts may be parented
+  to, and `UnitDeathEffect` / `VisionTarget` both already skip disabled renderers, so they inherit the
+  decision for free.
+- It runs **after** the swap path's height normalisation and **before** its grounding. Measuring
+  without the plate would silently scale every unit up by the plate's share of its height; grounding
+  afterwards is what stops the body floating where the plate used to hold it up (the shared trooper's
+  legs start a quarter of the way *up* its plate — measured, not assumed).
+- The no-model path is handled too. The Trooper has no `modelPrefab` and used to return before any of
+  this, so `ActiveModelRoot` and the plate rule now apply to the shared body as well.
+
+*Measured on all five classes:* plate hidden on Trooper/Bulwark/Marksman/Saboteur, visible on Turret,
+and every one of them reporting a foot offset of exactly `0.00000` from the table.
+
+### 4. Star ratings — the cheapest content in the project
+
+`parTimeSeconds` and `parUnitsLost` have been authored on **every** level since levels existed and
+were read by absolutely nothing. The design work was already done; only the arithmetic was missing.
+
+- `LevelDefinition.StarsFor` — one star for winning, one for beating par time, one for beating par
+  losses. An unauthored par awards its star rather than withholding it.
+- `MatchStats` — match clock and unit-loss counters. The clock starts when the **siege** goes live,
+  not at scene load, so a player is never graded on how long their table took to scan.
+- `LevelProgress` — best-ever stars per level in `PlayerPrefs`, written immediately (an AR app gets
+  killed from the recents list, not closed).
+- Shown in the outcome card's existing body label and appended to the level-select card titles, so
+  **no scene authoring was needed** — the step most likely to half-ship here.
+
+Defeat gets the same time/lost/killed summary with no rating. Rating a loss is either a consolation
+star (dishonest) or zero stars (a second punishment for the same event).
+
+### 5. Purchase-path abuse hardening
+
+Reviewed after the user asked whether a bot could hammer the subscription call. Findings and fixes are
+in `SECURITY.md` under the 2026-08-14 entry; the short version is that **entitlements were never
+forgeable** (they come from RevenueCat's backend against a Google-signed receipt), but three call
+sites were unbounded in *volume*: Restore had no in-flight guard at all, focus-driven customer-info
+refreshes fired once per focus change, and the paywall refetched offerings on every panel open. All
+three are now throttled, and `MonetizationManager` refuses overlapping store operations outright so a
+future second screen cannot reintroduce it.
+
+### What Pass H did NOT touch
+
+`ARTest.unity` is **unmodified** (confirmed clean). The sentry overhaul proper, re-authoring The
+Narrows, garrison bucketing, and `requireLineOfSight` on deploy are all still deferred. Sound files
+are still outstanding. The RevenueCat SDK 7.4.1 to 8.x decision is still open and still the user's
+call. The privacy policy was written immediately after Pass H — see Section 15 — but is **not yet
+published**, which keeps it a hard Play Console blocker before the production track. See the README's
+closed-testing checklist.
+
+---
+
+## Section 15 — The privacy policy (written 2026-08-14, NOT yet published)
+
+Not a game system, but the one item on the closed-testing checklist that can stop publication
+outright, so it is recorded here with the same care as a mechanic.
+
+**Where it lives.** `docs/privacy/index.html` is the authoritative text — a self-contained static
+page styled to match `UITheme`, intended for GitHub Pages serving from `main` / `/docs`, which gives
+`https://mikhil-sec.github.io/ScrapSiege/privacy/`. `docs/PRIVACY_POLICY.md` is a summary plus the
+maintenance rules. `docs/.nojekyll` makes the Pages deploy static and deterministic rather than
+routing through Jekyll, and `docs/index.html` keeps the site root from being a bare 404 on a repo
+that judges will open.
+
+**Why it is written from the code rather than from a template.** A privacy policy is a public,
+binding statement about software behaviour, and an inaccurate one is a Play policy violation rather
+than a typo. Every claim in it was checked first:
+
+| Claim | How it was verified |
+|---|---|
+| No analytics, ads, or crash SDK | `Packages/manifest.json` has no UGS/Firebase/ads package; a search across `Assets/**/*.cs` for analytics, ad and Firebase symbols returns nothing but an unrelated `RejectedTapLogInterval` |
+| RevenueCat only ever sees an anonymous ID | `MonetizationManager` never calls `LogIn` or sets subscriber attributes; it configures with an API key alone, so the SDK generates `$RCAnonymousID:…` |
+| Local storage is only stars + mute + a cached Pro flag | The only `PlayerPrefs` call sites are `LevelProgress` and `GameAudio` |
+| The six declared permissions and what each is for | `SECURITY.md` section B's allowlist, itself verified against built artifacts with `aapt2 dump badging` |
+| Camera data never leaves the device | No networking outside RevenueCat (the LAN code was archived with the two-player build); ARCore Cloud Anchors are not used |
+
+**The coupling worth remembering.** Section 5 of the policy and `SECURITY.md` section B's permission
+allowlist are the same list written twice — once as an internal control, once as a public promise.
+A checklist item now exists in `SECURITY.md` to keep them in step, because the failure mode is silent:
+a package added later that injects a permission would make the shipped policy understate the app
+without anyone editing the policy.
+
+**What is deliberately left for the user**, because none of it is code: creating the support address
+and replacing the single `CONTACT_EMAIL_PLACEHOLDER` token, enabling GitHub Pages, pasting the URL
+into Play Console, and completing the Data Safety form so its answers match the policy.

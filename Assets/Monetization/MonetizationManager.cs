@@ -95,6 +95,34 @@ public class MonetizationManager : MonoBehaviour
         RefreshCustomerInfo();
     }
 
+    [Tooltip("Minimum seconds between two customer-info fetches. Focus changes drive refreshes, and " +
+             "an app can be focused and unfocused as fast as the OS can switch windows.")]
+    [SerializeField] private float minRefreshIntervalSeconds = 20f;
+
+    private float lastRefreshTime = float.NegativeInfinity;
+    private bool refreshInFlight;
+
+    /// <summary>
+    /// True when a customer-info fetch may be issued now. Cheap client-side rate limiting.
+    ///
+    /// <para><b>What this is actually defending against.</b> Not fraud - a purchase cannot be forged
+    /// by calling this, because entitlements are decided by RevenueCat from a Google-signed receipt
+    /// and never by anything the client says. What it defends against is <i>volume</i>: every
+    /// entitlement read is bracketed by an app focus change, and an automated focus/unfocus loop (or
+    /// a device stuck cycling one) would fire an unbounded number of backend calls under this
+    /// project's own API key. The failure mode is rate limiting that lands on real players trying to
+    /// restore a subscription, so the throttle is here rather than being left to the backend.</para>
+    ///
+    /// <para>Correctness is unaffected: RevenueCat's SDK caches customer info for minutes anyway,
+    /// and a genuine entitlement change is delivered through the purchase/restore callbacks, which
+    /// are NOT throttled - only the speculative background refresh is.</para>
+    /// </summary>
+    private bool MayRefresh()
+    {
+        if (refreshInFlight) return false;
+        return Time.unscaledTime - lastRefreshTime >= Mathf.Max(0f, minRefreshIntervalSeconds);
+    }
+
     /// <summary>
     /// Pushes any purchases Google Play knows about but RevenueCat does not up to the backend, then
     /// applies whatever comes back. This is the recovery path for a purchase that completed on the
@@ -106,8 +134,16 @@ public class MonetizationManager : MonoBehaviour
     /// </summary>
     public void SyncPurchases(Action<bool, string> onComplete = null)
     {
+        if (!TryBeginStoreOperation(out string busy))
+        {
+            onComplete?.Invoke(false, busy);
+            return;
+        }
+
         purchases.SyncPurchases((customerInfo, error) =>
         {
+            storeOperationInFlight = false;
+
             if (error != null)
             {
                 Debug.LogWarning($"MonetizationManager: SyncPurchases failed - {error.Message}");
@@ -119,10 +155,47 @@ public class MonetizationManager : MonoBehaviour
         });
     }
 
-    public void RefreshCustomerInfo()
+    private bool storeOperationInFlight;
+
+    /// <summary>
+    /// One store operation at a time. Purchase, restore and sync all mutate the same entitlement
+    /// state and all go out over the network, so overlapping them means racing callbacks writing
+    /// <see cref="ProEntitlement"/> in an order nobody chose.
+    ///
+    /// <para><b>The concrete case this closes.</b> The paywall's Subscribe button disables itself
+    /// while a purchase is in flight, but Restore did not, so a held finger (or an automated tapper,
+    /// or an accessibility repeat) could issue an unbounded stream of RestorePurchases calls.
+    /// Enforcing it here rather than only in the UI means a second screen wired to these methods
+    /// later cannot reintroduce it, and the guard sits next to the calls it is guarding.</para>
+    /// </summary>
+    private bool TryBeginStoreOperation(out string busyMessage)
     {
+        if (storeOperationInFlight)
+        {
+            busyMessage = "Already working on it...";
+            return false;
+        }
+
+        storeOperationInFlight = true;
+        busyMessage = null;
+        return true;
+    }
+
+    /// <summary>
+    /// Re-reads entitlement state. Rate limited - see <see cref="MayRefresh"/>. Pass
+    /// <paramref name="force"/> only for a user-initiated action, never for a background refresh.
+    /// </summary>
+    public void RefreshCustomerInfo(bool force = false)
+    {
+        if (!force && !MayRefresh()) return;
+
+        lastRefreshTime = Time.unscaledTime;
+        refreshInFlight = true;
+
         purchases.GetCustomerInfo((customerInfo, error) =>
         {
+            refreshInFlight = false;
+
             if (error != null)
             {
                 Debug.LogWarning($"MonetizationManager: failed to fetch customer info - {error.Message}");
@@ -132,9 +205,40 @@ public class MonetizationManager : MonoBehaviour
         });
     }
 
+    [Tooltip("Minimum seconds between two offerings fetches. The paywall is a panel that gets " +
+             "toggled, so it refetches every time it opens.")]
+    [SerializeField] private float minOfferingsIntervalSeconds = 10f;
+
+    private float lastOfferingsTime = float.NegativeInfinity;
+    private Purchases.Offerings cachedOfferings;
+
+    /// <summary>
+    /// Fetches the current offerings, serving a recent result from memory rather than re-asking.
+    ///
+    /// <para>Prices do not change between two taps, and the paywall can be opened and closed as fast
+    /// as a finger moves - so without this, "open paywall, close, repeat" is a free unbounded stream
+    /// of backend calls. The callback contract is unchanged, so callers cannot tell which path they
+    /// got; only the first fetch after the interval reaches the network.</para>
+    /// </summary>
     public void FetchOfferings(Purchases.GetOfferingsFunc callback)
     {
-        purchases.GetOfferings(callback);
+        if (cachedOfferings != null
+            && Time.unscaledTime - lastOfferingsTime < Mathf.Max(0f, minOfferingsIntervalSeconds))
+        {
+            callback?.Invoke(cachedOfferings, null);
+            return;
+        }
+
+        purchases.GetOfferings((offerings, error) =>
+        {
+            if (error == null && offerings != null)
+            {
+                cachedOfferings = offerings;
+                lastOfferingsTime = Time.unscaledTime;
+            }
+
+            callback?.Invoke(offerings, error);
+        });
     }
 
     /// <summary>
@@ -152,8 +256,16 @@ public class MonetizationManager : MonoBehaviour
     /// </summary>
     public void Purchase(Purchases.Package package, Action<bool, string, string> onComplete)
     {
+        if (!TryBeginStoreOperation(out string busy))
+        {
+            onComplete?.Invoke(false, busy, null);
+            return;
+        }
+
         purchases.PurchasePackage(package, (productIdentifier, customerInfo, userCancelled, error) =>
         {
+            storeOperationInFlight = false;
+
             if (error != null)
             {
                 onComplete?.Invoke(false, error.Message, error.ReadableErrorCode);
@@ -171,8 +283,16 @@ public class MonetizationManager : MonoBehaviour
 
     public void Restore(Action<bool, string> onComplete)
     {
+        if (!TryBeginStoreOperation(out string busy))
+        {
+            onComplete?.Invoke(false, busy);
+            return;
+        }
+
         purchases.RestorePurchases((customerInfo, error) =>
         {
+            storeOperationInFlight = false;
+
             if (error != null)
             {
                 onComplete?.Invoke(false, error.Message);

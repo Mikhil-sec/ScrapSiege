@@ -217,6 +217,10 @@ namespace ScrapSiege.Levels
 
             StartAICommander();
 
+            // Last, so the clock starts on the frame the player can actually do something rather
+            // than at the top of a method that also bakes a NavMesh and builds a battlefield.
+            outcomeController.BeginMatch();
+
             OnSiegeStarted?.Invoke();
         }
     }

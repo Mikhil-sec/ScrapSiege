@@ -68,6 +68,14 @@ namespace ScrapSiege.Siege
             baseHealth.OnBaseDestroyed.AddListener(HandlePlayerBaseDestroyed);
         }
 
+        /// <summary>
+        /// Starts the match clock. Called by <see cref="ScrapSiege.Levels.LevelMatchController"/> at
+        /// the moment the siege goes live, deliberately NOT at scene load - the player spends an
+        /// unbounded amount of time scanning a table and placing the board before that, and grading
+        /// them on their AR setup would make the time star a measure of their lighting conditions.
+        /// </summary>
+        public void BeginMatch() => MatchStats.Begin();
+
         private void HandleEnemyBaseDestroyed()
         {
             if (!EndMatch()) return;
@@ -91,6 +99,10 @@ namespace ScrapSiege.Siege
         {
             if (decided) return false;
             decided = true;
+
+            // Stopped before the outcome events fire, so the HUD reads a frozen time rather than one
+            // that keeps ticking while the player looks at the card.
+            MatchStats.Stop();
 
             // A missing Inspector reference here must never block the outcome event from firing - log
             // it loudly and keep going instead of a silent no-op or an uncaught exception (this

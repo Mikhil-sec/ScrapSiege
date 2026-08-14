@@ -239,7 +239,14 @@ namespace ScrapSiege.UI
                         text.text = level.levelNumber.ToString("00");
                         break;
                     case "Title":
-                        text.text = level.displayName;
+                        // Best rating rides on the title rather than getting a row of its own, so
+                        // progress shows up with no change to the card prefab - a scene edit is the
+                        // step most likely to half-ship here. Only on a level that has actually been
+                        // beaten: three hollow stars on every unplayed card reads as a chore list.
+                        int best = unlocked ? ScrapSiege.Levels.LevelProgress.BestStars(level) : 0;
+                        text.text = best > 0
+                            ? $"{level.displayName}   {ScrapSiege.Levels.LevelProgress.StarGlyphs(best)}"
+                            : level.displayName;
                         text.color = unlocked ? UITheme.TextPrimary : UITheme.TextMuted;
                         break;
                     case "Briefing":

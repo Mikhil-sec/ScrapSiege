@@ -131,12 +131,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ScrapSiege.Siege.GarrisonSentry
   detectionRadius: 0.2
-  detectionRadiusFraction: 0.2
+  detectionRadiusFraction: 0.26
   navMeshSampleFraction: 0.02
   facingArcDegrees: 150
   tickInterval: 0.5
   damagePerTick: 5
   navMeshSampleDistance: 0.1
+  fallbackEyeHeight: 0.03
   referenceBoardLength: 0.6
   boardScaleClamp: {x: 0.55, y: 1.8}
 --- !u!114 &4842485151751418025

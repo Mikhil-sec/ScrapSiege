@@ -25,28 +25,42 @@ The full loop is **playable end to end on device and accepted by device testing 
 - **AI commander** — rule-based (explicit thresholds and utility scoring, no learned model). Runs a ~1s decision loop over **Push / Intercept / Hold**: bank resources for a wave worth telegraphing, push the least-defended lane, or reinforce the lane you committed to. It earns resources on the same `ResourceEconomy` component you do — difficulty is decision quality and reaction delay, never free income. Enabled per level via `LevelDefinition.hasAICommander`, so the three original maps are untouched.
 - **Unit combat, frontage-limited** — units of opposing sides fight when they meet, but **at most one enemy can engage a unit**. A unit with no *unengaged* enemy nearby walks straight past. Numbers therefore buy **breakthrough**, not slaughter — without this cap, losses scale by Lanchester's square law, the bigger stack always wins, and "always deploy maximum units" would be strictly correct, flattening positioning, vantage and cover into irrelevance. Cover reduces damage taken and a duel winner has a short recovery, so three units in cover beat five in the open.
 - **Readable deaths and readable fire** — a killed unit breaks into its own body parts, which fly, settle on the table and fade over two seconds rather than vanishing. Sentries draw a tracer to the exact unit they are damaging plus a hit flash, driven from the damage tick itself so the visual can't claim a shot that dealt no damage.
-- **Win *and* lose conditions** — both bases are watched, with a single outcome panel retitled per result.
+- **Win *and* lose conditions, with a graded result** — both bases are watched, and a win is rated out of three stars against the level's own authored par time and par losses. Best-ever rating per level persists and shows on the level-select card.
+- **Five unit classes** — Trooper (line), Bulwark (soak), Marksman (reach, helpless up close), Saboteur (invisible to sentries, never stops, hits a base four times as hard) and the Pro-gated Turret (an emplacement that holds a lane for twelve seconds, then visibly breaks down).
 - **Vantage** — camera height above the board continuously drives deploy precision, with a ring drawn on the table showing your current scatter radius *before* you tap.
 - **Rally** — redirect every deployed unit through a new lane, available only when you're physically pulled back far enough to see the whole board.
 - **True line of sight** — graded (hidden / faint / partial / full) from three raycasts per enemy, with last-known-position ghosts that *drift* along the target's last heading, so stale intel is wrong rather than merely old.
 - **Sentry arcs** — garrison units cover a 150° facing arc drawn on the table, so walking around the board to reach their blind side is a real tactic.
 - **Route variety** — **Direct** (shortest line; threads a cover corridor only when that genuinely is shortest) vs **Covered** (detours to hug cover and avoid garrison fire). Driven by *per-agent* NavMesh area costs, so both modes can reach anywhere and differ only in what they value.
 - **Low-poly art** — Blender-built trooper and terrain models with procedural march/bob/lean/lunge animation driven from navigation velocity. No rigging.
-- **RevenueCat integration** — SDK installed, dashboard configured, one real Pro-gated cosmetic. The real Play Store subscription product (`scrap_siege_pro:monthly`) is created and registered in RevenueCat, and the scene carries the real Play Store API key. A signed, non-debuggable release **AAB** builds cleanly via `Scrap Siege > Build Android APK (RELEASE - for Play Store)`. Not yet uploaded to Play Console Internal Testing, so no real on-device purchase has been completed yet.
+- **RevenueCat integration** — SDK installed, dashboard configured, one real Pro-gated cosmetic. The real Play Store subscription product (`scrap_siege_pro:monthly`) is created and registered in RevenueCat, and the scene carries the real Play Store API key. A signed, non-debuggable release **AAB** builds cleanly via `Scrap Siege > Build Android APK (RELEASE - for Play Store)`, and version 0.5.0 was uploaded to Play Console Internal Testing, where a real subscription was purchased end to end and the `pro` entitlement confirmed active on device (2026-08-10/11).
 
 ### Not built yet
 
-- **Sound** — no audio at all yet, and it's the most visible remaining gap in a demo video.
-- **Star ratings / per-level results** — `parTimeSeconds` and `parUnitsLost` are authored on every level but nothing reads them.
-- **Sentry system overhaul** — deliberately paused; a cluster of tuning work is deferred with it (see below).
+- **Recorded audio** — every sound is synthesized procedurally at runtime. A drop-in override layer for real clips is in place and `docs/SOUND_SHOPPING_LIST.md` is the list; no files yet.
+- **Sentry system overhaul** — deliberately paused. Two of the items deferred with it were closed on 2026-08-14 because a device test surfaced their symptoms (see below); the rest still stand.
+- **A *published* privacy policy.** The policy itself is now written — [`docs/privacy/index.html`](docs/privacy/index.html), with a summary in [`docs/PRIVACY_POLICY.md`](docs/PRIVACY_POLICY.md) — and describes what the app actually does rather than a template's hedges. What remains is not writing but *publishing*: enabling GitHub Pages, replacing the one contact-email placeholder, and entering the URL in Play Console. Until that URL resolves, this is still a **hard blocker on publishing**.
 - Board elevation, more levels, demo video and submission assets.
+
+### Closed-testing checklist (Play requires 12 testers / 14 days before production)
+
+- [x] Signed release AAB builds and uploads; real subscription purchased end to end and the `pro` entitlement confirmed active on device (2026-08-10/11).
+- [x] Purchase paths reviewed for abuse and rate limited (`SECURITY.md`, 2026-08-14).
+- [x] Per-level results and star ratings, so a tester has a reason to replay a map.
+- [ ] **Device-test Pass H** — the sentry placement fix, the Turret lifetime, and the hidden unit stands have only been Editor-verified.
+- [x] **Privacy policy written** — `docs/privacy/index.html`, covering camera/ARCore, RevenueCat, local storage, permissions and deletion rights.
+- [ ] **Privacy policy *published*** (blocker, above) — enable GitHub Pages on `main` / `/docs`, replace `CONTACT_EMAIL_PLACEHOLDER`, paste the URL into Play Console, and answer the Data Safety form to match.
+- [ ] Recorded audio over the procedural layer.
+- [ ] Store listing assets: screenshots, feature graphic, short/full description.
+- [ ] Demo video — **deliberately last**, once the product is final.
 
 ### Known limitations
 
 - **The AI commander is v1 and has had one device test.** Two difficulty tiers now exist — "Recruit" (levels 4) and "Veteran" (level 5, Pro) — but both sets of numbers are still derived from design intent rather than tuned against real play. Veteran has not been played on device at all yet.
-- Only **one generic unit type** — no combat variety yet. The AI's "unit mix" is currently just a cover-preference roll.
+- **Five unit classes** ship (Trooper / Bulwark / Marksman / Saboteur / Turret) and the AI fields four of them by weighted pick, but **the balance is derived from measurement rather than from play.** Every number in `plan.md` Sections 13–14 is a first guess.
 - **AR plane detection is this project's proven weak point.** See `plan.md` Section 10.
-- **Deferred as a group with the sentry overhaul** (all sentry-balance work that the overhaul would invalidate): `coverLaneMargin` is still an absolute real-world distance rather than a fraction of board length, which makes cover disproportionately generous on a small board; and **The Narrows doesn't enforce its "one safe corridor" premise** — both sides of the wall are viable, unpunished routes. Design gaps, not bugs; see `plan.md` Section 10.
+- **Still deferred with the sentry overhaul:** re-authoring **The Narrows** so the wall is genuinely central (both sides of it are still viable routes — a layout redesign, not a tuning fix) and garrison bucketing. `coverLaneMargin` **was** on this list and was fixed on 2026-08-14: it is now a fraction of board length, which is what made the single sentry on level 01 shoot at anything at all. See `plan.md` Section 14.
+- **Pass H (2026-08-14) has not been on a phone.** The sentry-placement fix, the Turret's 12-second lifetime and the hidden unit stands are Editor-verified only.
 - **Unit size is not board-relative** — units stay ~5cm at any board size, so on a pinched-out large board they're proportionally small.
 - **RevenueCat purchases are confirmed working on a real device** (2026-08-10) — the AAB is on Internal Testing, a license-tester subscription was purchased end to end, and the `pro` entitlement came back active. The entry requirement is met. What Pro *does* is still thin, though: one Pro-only level (05 The Foundry) and a saturated terrain palette.
 - **Audio is synthesized at runtime, not recorded.** Every sound effect is generated procedurally in `ProceduralSfx.cs` — no audio files in the repo, no licensing to track. There is no music, and the mix has not been checked on phone speakers.

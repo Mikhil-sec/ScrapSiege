@@ -78,6 +78,10 @@ embedded token, or a signing credential.
       to the user's identity, location, or files, only the right to sample the IMU above 200 Hz,
       which ARCore's motion tracking requires on targetSdk 31+. Without it ARCore refuses to
       start and the camera never opens (see the 2026-08-10 finding below).
+- [ ] **If the permission list above changed, section 5 of `docs/privacy/index.html` changed with
+      it.** The allowlist and the public policy's permission table are the same list stated twice.
+      A shipped app whose manifest declares more than its privacy policy discloses is a Play policy
+      violation, and the discrepancy is trivially machine-checkable by Google.
 - [ ] Grep the built artifact for anything that should not be in it before uploading.
 - [ ] `AndroidBundleVersionCode` (`ProjectSettings.asset`) is **higher than every previous upload**,
       including failed/rejected ones — Play Console tracks the highest version code it has ever seen per
@@ -126,6 +130,112 @@ embedded token, or a signing credential.
 ---
 
 ## Findings register
+
+### 2026-08-14 — abuse/rate-limit review of the purchase paths ("could a bot hammer the subscription call?")
+
+Asked directly by the user before closed testing. Reviewed every path that reaches Google Play
+Billing or the RevenueCat backend. **No forgeable-entitlement finding. Three unbounded-volume
+findings, all fixed.**
+
+#### First, what is NOT a risk — so nobody re-audits it
+
+- **A bot cannot mint an entitlement by calling anything a million times.** `ProEntitlement` is only
+  ever written from `MonetizationManager.ApplyCustomerInfo`, which reads
+  `customerInfo.Entitlements.Active` — a value produced by **RevenueCat's servers** after they
+  validate a **Google-signed** purchase token. There is no client-side "grant" call, no local receipt
+  parsing, and no code path where a failed or absent purchase results in `SetUnlocked(true)`.
+  Volume changes nothing about that: a million rejected calls grant a million nothings.
+- **There is no server of ours to exhaust.** This project owns no backend. The only endpoints in play
+  are Google Play Billing and RevenueCat, both of which do their own rate limiting and neither of
+  which is "our system" to break.
+- **The API key in the scene is a publishable client key, not a secret** (already recorded in the
+  2026-08-08 audit). Its capability ceiling is: read offerings, read *the calling customer's own*
+  info, and initiate a purchase that Google still has to authorise. It cannot grant entitlements,
+  issue refunds, read another customer, or change dashboard configuration.
+- **A modded APK can flip the local flag, and that is accepted.** Anyone repackaging the app can force
+  `ProEntitlement.IsUnlocked` true and get the Pro level and the Turret. This is a single-player game
+  with no server authority and nothing to steal from other players; the cost of that is one person
+  playing a level for free. Defending it would need a backend the project does not have and does not
+  need. **Do not add obfuscation theatre for this.**
+
+#### Finding 1 (fixed) — Restore Purchases had no in-flight guard at all
+
+`PaywallController.OnSubscribePressed` disabled its own button for the duration of a purchase.
+`OnRestorePressed` did not. Every tap issued another `Purchases.RestorePurchases` network call, with
+nothing bounding the rate — a held finger, an accessibility key-repeat, or a scripted tapper produced
+an unbounded stream. The realistic damage is not fraud but **rate limiting landing on a real player
+trying to restore a subscription they paid for**, plus racing callbacks all writing
+`ProEntitlement` in an order nobody chose.
+
+**Fix:** `MonetizationManager` now refuses overlapping store operations outright — one flag covering
+Purchase, Restore and SyncPurchases, cleared in the callback. Enforced at the manager rather than only
+in the UI, so a second screen wired to these methods later cannot reintroduce it. `PaywallController`
+also disables the Restore button for the duration, matching Subscribe.
+
+#### Finding 2 (fixed) — customer-info refresh fired once per app focus change
+
+`OnApplicationFocus(true)` called `RefreshCustomerInfo()` unconditionally. That hook exists for a good
+reason (the Play purchase flow runs in its own activity, so every purchase is bracketed by a
+pause/resume) but an app can be focused and unfocused as fast as the OS can switch windows, and a
+device stuck cycling — or a script doing it deliberately — turns that into an unbounded call stream
+under this project's own key.
+
+**Fix:** `MayRefresh()` throttles background refreshes to one per 20s and drops any request while one
+is already in flight. **Correctness is unaffected:** the SDK caches customer info for minutes anyway,
+and genuine entitlement changes arrive through the purchase/restore callbacks, which are deliberately
+**not** throttled — only the speculative refresh is.
+
+#### Finding 3 (fixed) — the paywall refetched offerings on every panel open
+
+The paywall is a toggled panel, not a loaded screen, so `OnEnable` -> `RefreshOffering` ->
+`GetOfferings` ran every time it opened. "Open, close, repeat" was a free unbounded call stream.
+
+**Fix:** `FetchOfferings` serves a cached result for 10s. The callback contract is unchanged, so
+callers cannot tell which path they got.
+
+#### Not changed, and why
+
+- **No client-side purchase-attempt counter or lockout.** Google Play's own flow already requires
+  user authorisation per purchase and refuses a second purchase of a subscription the account owns
+  (`ProductAlreadyPurchasedError`, which this app handles by syncing). A homegrown lockout would add a
+  way to accidentally lock a paying customer out of buying.
+- **No throttle on `SyncPurchases` beyond the in-flight guard.** It is the recovery path for a player
+  who paid and has no entitlement; making it harder to reach would trade a real user's money for a
+  hypothetical bot's bandwidth.
+- **`LevelProgress` (new this pass) is PlayerPrefs and is not a security boundary.** It stores star
+  ratings only. Nothing gated by the entitlement is stored there and it is never consulted about paid
+  access. Stated explicitly in the file so it does not drift into being one.
+
+> **Status: fixed in code, compile-verified, NOT yet exercised against the live store.** The next real
+> device test should confirm a purchase and a restore still complete normally — the throttles are
+> deliberately generous (20s / 10s) precisely so they cannot interfere with a genuine flow, but that
+> is an assertion until someone buys something.
+
+#### Open, and NOT a code issue: the privacy policy is written but not yet published
+
+Google Play requires a privacy-policy URL for any app that has in-app purchases, and it is checked
+before the production track. This is a hosted page plus a Play Console field, not a code change, but
+it is a hard blocker on publishing and belongs on the closed-testing checklist.
+
+**Written 2026-08-14:** `docs/privacy/index.html` (authoritative) plus `docs/PRIVACY_POLICY.md`
+(summary + maintenance notes). Its contents were derived from the code, not from a template — the
+declared permissions, the absence of any analytics/ads SDK, the `PlayerPrefs` keys, and the fact that
+`MonetizationManager` never calls `LogIn` or sets subscriber attributes (so RevenueCat only ever sees
+its own anonymous ID) were each checked before being asserted publicly.
+
+**Still to do, and none of it is code:** enable GitHub Pages (`main` / `/docs`), replace the single
+`CONTACT_EMAIL_PLACEHOLDER` token, enter the URL in Play Console, and complete the Data Safety form
+consistently with the policy.
+
+> **New standing checklist item — a privacy policy is a security control here, not just paperwork.**
+> Section B's permission allowlist and section 5 of the policy are the same list stated twice, once
+> privately and once publicly. **Any permission added to the app must be added to both**, in the same
+> change. Likewise, if `MonetizationManager` ever identifies users by anything other than the SDK's
+> anonymous ID, section 2 of the policy becomes a false public statement and must be corrected before
+> that build ships. A privacy policy that understates what an app collects is a Play policy violation
+> and, in some jurisdictions, a regulatory one.
+
+---
 
 ### 2026-08-10 — new permission added: `HIGH_SAMPLING_RATE_SENSORS` (not a vulnerability)
 

@@ -191,6 +191,16 @@ namespace ScrapSiege.Siege
 
         private UnitMuzzle muzzle;
 
+        // Emplacement lifetime (see UnitClass.lifetimeSeconds). Zero means "lives forever", which is
+        // every mobile class and was every class at all before 2026-08-14.
+        private float lifeRemaining;
+        private float breakdownLength;
+        private bool breakingDown;
+        private float breakdownSparkTimer;
+        private Transform breakdownModel;
+        private Quaternion breakdownModelRest;
+        private Vector3 breakdownTopple;
+
         private bool classApplied;
         private bool boardScaleApplied;
 
@@ -339,6 +349,11 @@ namespace ScrapSiege.Siege
             attackDamage = definition.attackDamage;
             winnerRecoverySeconds = definition.winnerRecoverySeconds;
             damageToBase = definition.damageToBase;
+
+            lifeRemaining = Mathf.Max(0f, definition.lifetimeSeconds);
+            breakdownLength = lifeRemaining > 0f
+                ? Mathf.Clamp(definition.breakdownSeconds, 0f, lifeRemaining * 0.5f)
+                : 0f;
 
             if (!Mathf.Approximately(definition.modelScaleMultiplier, 1f))
             {
@@ -637,6 +652,11 @@ namespace ScrapSiege.Siege
             ClearTarget();
             ReleaseAttackers(grantRecovery: true);
 
+            // A turret reaching the end of its clock is not a loss the player should be graded on -
+            // it is the cost they knowingly paid, and counting it would make deploying the class at
+            // all a guaranteed hit to the efficiency star.
+            if (!breakingDown) MatchStats.ReportUnitLost(Team);
+
             UnitDeathEffect.Play(gameObject, transform.position.y);
             Destroy(gameObject);
         }
@@ -674,6 +694,12 @@ namespace ScrapSiege.Siege
         {
             if (dying) return;
 
+            // Checked before anything else: once a unit is breaking down it must not acquire, fire,
+            // walk or arrive. Returning here rather than adding a `breakingDown` guard to each of
+            // those is what keeps "it is finished" from being four separate conditions that can
+            // disagree.
+            if (UpdateLifetime()) return;
+
             if (recoveryRemaining > 0f)
                 recoveryRemaining = Mathf.Max(0f, recoveryRemaining - Time.deltaTime);
 
@@ -692,6 +718,106 @@ namespace ScrapSiege.Siege
         }
 
         private bool Evades => unitClass != null && unitClass.evadesCombat;
+
+        /// <summary>True while this unit is visibly falling apart at the end of its lifetime.</summary>
+        public bool IsBreakingDown => breakingDown;
+
+        /// <summary>
+        /// Seconds of life left, or 0 for a unit that does not expire. Read by the HUD so the player
+        /// can see how long an emplacement they paid for has left.
+        /// </summary>
+        public float LifeRemaining => lifeRemaining;
+
+        /// <summary>Total authored lifetime, or 0 for a permanent unit. Pairs with <see cref="LifeRemaining"/>.</summary>
+        public float LifeTotal => unitClass != null ? Mathf.Max(0f, unitClass.lifetimeSeconds) : 0f;
+
+        /// <summary>
+        /// Runs down an emplacement's clock and plays its breakdown. Returns true when the unit is
+        /// finished and the rest of Update must not run.
+        ///
+        /// <para><b>Why a lifetime exists at all.</b> Reach-only combat means nothing chases, and an
+        /// emplacement never advances - so a turret dropped off the AI's line of advance is a unit
+        /// that literally cannot be answered, and turrets accumulate for the whole match. It was the
+        /// one Pro perk that touched power (plan.md Section 10 has always flagged that as the
+        /// arguable call), and on device it read as simply too strong. A clock turns it from a wall
+        /// into a window: still the only thing that holds ground you cannot watch, but a cost you
+        /// have to keep paying. That is a perk worth buying and not one that wins on its own.</para>
+        ///
+        /// <para><b>Why the breakdown is animated rather than a despawn.</b> A unit that blinks out
+        /// is indistinguishable from a bug, and this project has already lost a session to exactly
+        /// that symptom - see <see cref="UnitDeathEffect"/>, which exists for the same reason. So the
+        /// last <see cref="UnitClass.breakdownSeconds"/> are spent visibly failing: it stops firing,
+        /// sags, throws sparks, topples, and only then comes apart through the normal death effect,
+        /// so a broken turret and a killed turret end the same way.</para>
+        ///
+        /// <para>Everything is applied to the MODEL, never to this transform: the root carries the
+        /// NavMeshAgent (which owns position) and is written by the facing code, so a topple applied
+        /// there would be fought or silently overwritten.</para>
+        /// </summary>
+        private bool UpdateLifetime()
+        {
+            if (lifeRemaining <= 0f && !breakingDown) return false;
+
+            lifeRemaining = Mathf.Max(0f, lifeRemaining - Time.deltaTime);
+
+            if (!breakingDown && lifeRemaining > breakdownLength) return false;
+
+            if (!breakingDown) BeginBreakdown();
+
+            TickBreakdown();
+
+            if (lifeRemaining <= 0f) Die();
+            return true;
+        }
+
+        private void BeginBreakdown()
+        {
+            breakingDown = true;
+
+            // Stops shooting and, just as importantly, frees the attacker slot it was holding on
+            // whatever it had locked - a dying turret must not keep an enemy's cap occupied.
+            ClearTarget();
+            ReleaseAttackers();
+
+            var visual = GetComponent<UnitClassVisual>();
+            breakdownModel = visual != null ? visual.ActiveModelRoot : null;
+            if (breakdownModel != null) breakdownModelRest = breakdownModel.localRotation;
+
+            // A fixed topple axis per unit, rolled once, so two turrets expiring together fall
+            // different ways instead of in lockstep.
+            breakdownTopple = new Vector3(Random.Range(-1f, 1f), 0f, Random.Range(-1f, 1f));
+            if (breakdownTopple.sqrMagnitude < 1e-4f) breakdownTopple = Vector3.right;
+            breakdownTopple.Normalize();
+
+            ScrapSiege.Audio.GameAudio.Play(ScrapSiege.Audio.Sfx.UnitDeath, 0.5f);
+        }
+
+        private void TickBreakdown()
+        {
+            float progress = breakdownLength > 0f
+                ? Mathf.Clamp01(1f - lifeRemaining / breakdownLength)
+                : 1f;
+
+            if (breakdownModel != null)
+            {
+                // Eased so it hangs, shudders, then goes - a linear fall reads as a scripted prop
+                // rather than as something failing.
+                float eased = progress * progress;
+                breakdownModel.localRotation = breakdownModelRest
+                    * Quaternion.AngleAxis(eased * 70f, breakdownTopple)
+                    * Quaternion.AngleAxis(Mathf.Sin(progress * 40f) * (1f - progress) * 4f, Vector3.up);
+            }
+
+            breakdownSparkTimer -= Time.deltaTime;
+            if (breakdownSparkTimer > 0f) return;
+
+            // Accelerating: the sparks get more frantic as it goes, which is what tells the player
+            // this is about to end rather than that something is merely damaged.
+            breakdownSparkTimer = Mathf.Lerp(0.35f, 0.12f, progress);
+
+            Color color = unitClass != null ? unitClass.accentColor : new Color(1f, 0.72f, 0.32f);
+            CombatFx.Impact(MidHeightOf(this), color, boardLengthForFx, scale: 0.8f + progress);
+        }
 
         /// <summary>How far this unit can actually deal damage from - its own class's reach.</summary>
         private float AttackRange => engagementRadius;

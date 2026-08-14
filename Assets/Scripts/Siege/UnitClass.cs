@@ -113,6 +113,27 @@ namespace ScrapSiege.Siege
         [Tooltip("After winning a duel this class cannot start another for this long.")]
         public float winnerRecoverySeconds = 0.8f;
 
+        [Header("Lifetime")]
+        [Tooltip("Seconds this unit exists before it breaks down and dies on its own. 0 = permanent, " +
+                 "which is what every mobile class is and should stay.\n\n" +
+                 "This exists for the Turret. An emplacement that never expires is the only thing on " +
+                 "the board that cannot be answered by walking somewhere else: it never advances into " +
+                 "reach, so the AI's units - which never chase - mostly cannot reach it either, and it " +
+                 "accumulates. A timer converts it from a permanent wall into a window of denial, " +
+                 "which is a cost the player has to spend again. Reported from device 2026-08-14 as " +
+                 "'the pro turret is currently overpowered'.\n\n" +
+                 "Cost should be re-derived when this changes: the economy banks 1 scrap per 2s, so a " +
+                 "12s life at cost 3 is 'roughly half your income, half the time'.")]
+        public float lifetimeSeconds;
+
+        [Tooltip("How long the breakdown takes, out of the lifetime above. The unit stops firing the " +
+                 "moment it starts and sags, sparks and topples through this window before the normal " +
+                 "death debris plays.\n\n" +
+                 "It is deliberately visible rather than instant: this project has already spent a " +
+                 "session on a bug whose only symptom was a unit vanishing, so anything that removes " +
+                 "a unit on purpose must not look like the thing that removed one by accident.")]
+        public float breakdownSeconds = 1.8f;
+
         [Tooltip("Never starts a fight, and does not stop when something starts one with it - it " +
                  "walks on and takes the hits. A unit that cannot be pinned but also cannot clear " +
                  "its own path. Emplacements ignore this (they never move regardless).")]
@@ -205,6 +226,12 @@ namespace ScrapSiege.Siege
             if (attackDamage < 1) attackDamage = 1;
             if (attackTickSeconds < 0.05f) attackTickSeconds = 0.05f;
             if (engagementRadiusFraction <= 0f) engagementRadiusFraction = 0.06f;
+            if (lifetimeSeconds < 0f) lifetimeSeconds = 0f;
+
+            // A breakdown longer than the life it is carved out of would mean the unit is dying from
+            // the frame it spawns - it would never fire a shot, which is not a balance choice anyone
+            // would make on purpose.
+            if (lifetimeSeconds > 0f) breakdownSeconds = Mathf.Clamp(breakdownSeconds, 0f, lifetimeSeconds * 0.5f);
 
             if (string.IsNullOrWhiteSpace(shortLabel))
                 shortLabel = string.IsNullOrEmpty(displayName) ? "UNIT" : displayName.Substring(0, Mathf.Min(3, displayName.Length)).ToUpperInvariant();

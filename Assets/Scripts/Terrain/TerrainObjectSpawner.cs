@@ -45,9 +45,36 @@ namespace ScrapSiege.Terrain
         // free and unmissable, so precise placement bought the player nothing. At 0.05 the lane is
         // a real corridor you have to actually land in - which is what gives the vantage mechanic
         // something to be precise *about*. Retest Covered-vs-Direct routing after changing this.
-        // REAL metres - converted through WorldScale where used.
+        // REAL metres - converted through WorldScale where used. Only the legacy scan/Fortify flow
+        // still reads this; authored levels use the board-relative fraction below.
         [SerializeField] private float coverLaneMargin = 0.05f;
+
+        [Tooltip("Cover lane margin per side as a fraction of BOARD LENGTH, for authored levels.\n\n" +
+                 "The absolute value above was the last thing in the project still tuned in real " +
+                 "metres, and it was the reason a sentry had nothing to shoot at. Measured on The " +
+                 "Narrows: 0.05m per side turned the wall into a lane 0.67 units wide and each rubble " +
+                 "pile into one 0.81 wide, on a board only 1.65 wide - so cover blanketed everything " +
+                 "from the left edge to just past centre, and the single sentry's remaining " +
+                 "in-range-and-uncovered ground was a sliver 14% of the board's width. Cover was " +
+                 "free, so precision bought the player nothing.\n\n" +
+                 "0.035 gives roughly 40% of the board as genuinely open ground while a lane is still " +
+                 "wide enough to walk without threading a needle. Retest Covered-vs-Direct routing " +
+                 "after changing this - it is the main dial for how much cover is worth.")]
+        [Range(0.005f, 0.15f)]
+        [SerializeField] private float coverLaneMarginFraction = 0.035f;
+
         [SerializeField] private float coverLaneVolumeHeight = 1f;
+
+        // Set by LevelBuilder before it spawns anything. Zero on the scan/Fortify path, which has no
+        // board at all - that is what selects the absolute margin above.
+        private float boardLength;
+
+        /// <summary>
+        /// Tells the spawner which board the pieces it is about to place belong to, so cover lanes
+        /// scale with the battlefield the same way footprints and heights already do. Call before
+        /// <see cref="Spawn"/>; leaving it unset keeps the legacy absolute behaviour.
+        /// </summary>
+        public void SetBoardLength(float length) => boardLength = Mathf.Max(0f, length);
 
         // REAL metres, and only used by the legacy scan/Fortify flow, where they describe an actual
         // measured object on the table. Authored levels go through NormalisedHeightForCategory
@@ -376,9 +403,13 @@ namespace ScrapSiege.Terrain
             var modifier = coverVolumeGO.AddComponent<NavMeshModifierVolume>();
             modifier.area = NavMeshAreas.CoverAreaIndex;
             // sizeX/sizeZ already arrive in scaled world units (they come from board length), so the
-            // margin has to be converted too - otherwise the safe lane silently narrows by the world
-            // scale factor relative to the board, undoing the 0.25 -> 0.05 tuning pass.
-            float margin = WorldScale.Metres(coverLaneMargin);
+            // margin has to be in the same space. On an authored level that is a fraction of board
+            // length, which is the project-wide convention for every other distance; the converted
+            // absolute is the fallback for the scan/Fortify flow, which has no board to be a
+            // fraction of.
+            float margin = boardLength > 0f
+                ? coverLaneMarginFraction * boardLength
+                : WorldScale.Metres(coverLaneMargin);
             modifier.size = new Vector3(sizeX + margin * 2f, WorldScale.Metres(coverLaneVolumeHeight), sizeZ + margin * 2f);
             // Volume's transform.position is already at table height (data.Center), so this
             // offset just extends the volume upward from the table surface, not around data.Center.y again.
